@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# editor
+.vscode/
+.idea/
+
+# vercel
+.vercel
+
+# deps (none needed, but just in case)
+node_modules/
