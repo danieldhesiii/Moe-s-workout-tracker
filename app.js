@@ -137,6 +137,9 @@ function renderToday() {
     <div class="h-big">${plan.title}</div>
   </div>`;
 
+  // Guard: heal any stored check-in that predates the current schema
+  if (ci && !ci.result) { ci.result = computeReadiness(ci.answers || {}); state.checkins[todayKey()] = ci; save(); }
+
   if (!ci) {
     html += `<div class="card readiness-card" style="margin-top:16px">
       <div class="eyebrow">Daily check-in</div>
@@ -553,4 +556,13 @@ function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": 
 Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal });
 
 /* ---------------- Boot ---------------- */
-render();
+try {
+  render();
+} catch (err) {
+  console.error("Boot failed:", err);
+  // Never leave a blank screen — reset corrupt state and retry once.
+  try { localStorage.removeItem(STORE_KEY); state = defaultState(); render(); }
+  catch (e2) {
+    view.innerHTML = `<div class="empty"><div class="e-emoji">🛠️</div><p>Something glitched loading your data.<br>Tap below to reset and start fresh.</p><button class="btn btn-ember" style="margin-top:14px;width:auto" onclick="localStorage.clear();location.reload()">Reset app</button></div>`;
+  }
+}
