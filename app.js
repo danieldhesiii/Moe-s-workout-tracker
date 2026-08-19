@@ -177,16 +177,9 @@ function renderReadinessCard(r) {
   </div>`;
 }
 
-function renderWorkoutCard(plan, swapId) {
-  // Resolve swap into what she actually does
-  const resolved = resolveSwap(plan, swapId);
-  let html = `<div class="card" style="margin-top:12px">
-    <div class="wk-header">
-      <div><div class="eyebrow">Your session${swapId !== "planned" ? " · swapped" : ""}</div>
-      <h3 style="font-family:var(--font-display);font-size:20px;font-weight:600;margin-top:2px">${resolved.title}</h3></div>
-      ${resolved.tag}
-    </div>`;
-
+// Shared: the run + strength + coach body of a workout (used by Today, Plan detail & timer)
+function workoutBodyHtml(resolved) {
+  let html = "";
   if (resolved.run) {
     const rn = resolved.run;
     html += `<div class="wk-block">
@@ -198,7 +191,6 @@ function renderWorkoutCard(plan, swapId) {
       ${rn.warmup ? `<p class="muted" style="font-size:12.5px;margin-top:10px">🔥 Warm-up: ${rn.warmup}</p>` : ""}
     </div>`;
   }
-
   if (resolved.strength) {
     html += `<div class="wk-block"><div class="eyebrow" style="margin-top:16px">${resolved.strength.label}</div><div class="exlist">`;
     for (const ex of resolved.strength.block) {
@@ -206,9 +198,24 @@ function renderWorkoutCard(plan, swapId) {
     }
     html += `</div></div>`;
   }
-
   if (resolved.coach) html += `<div class="coach-note"><strong>Coach:</strong> ${resolved.coach}</div>`;
-  html += `<button class="btn btn-ember" style="margin-top:16px" onclick="openLogSheet('${resolved.title.replace(/'/g, "")}')">Log this session</button>`;
+  return html;
+}
+
+function renderWorkoutCard(plan, swapId) {
+  // Resolve swap into what she actually does
+  const resolved = resolveSwap(plan, swapId);
+  const t = resolved.title.replace(/'/g, "");
+  const isRest = /Rest Day|Full Rest/.test(resolved.title);
+  let html = `<div class="card" style="margin-top:12px">
+    <div class="wk-header">
+      <div><div class="eyebrow">Your session${swapId !== "planned" ? " · swapped" : ""}</div>
+      <h3 style="font-family:var(--font-display);font-size:20px;font-weight:600;margin-top:2px">${resolved.title}</h3></div>
+      ${resolved.tag}
+    </div>`;
+  html += workoutBodyHtml(resolved);
+  if (!isRest) html += `<button class="btn btn-ember" style="margin-top:16px" onclick="startWorkout('${t}', ${new Date().getDay()}, '${swapId}')">▶ Start workout</button>`;
+  html += `<button class="btn btn-ghost" style="margin-top:10px" onclick="openLogSheet('${t}')">Log without timer</button>`;
   html += `</div>`;
   return html;
 }
@@ -231,6 +238,95 @@ function resolveSwap(plan, swapId) {
       return { title: plan.title, run: plan.run, strength: plan.strength, coach: plan.coach, tag: plan.type === "rest" ? tagFor("rest") : tagFor(hard ? "hard" : "plan") };
     }
   }
+}
+
+/* ---------------- Plan day detail ---------------- */
+function openDayDetail(dow) {
+  const plan = WEEK_TEMPLATE[dow];
+  const resolved = resolveSwap(plan, "planned");
+  const t = resolved.title.replace(/'/g, "");
+  const isRest = plan.type === "rest";
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">${plan.day} · ${plan.focus}</div>
+    <h2 style="display:flex;align-items:center;gap:10px">${resolved.title} ${resolved.tag}</h2>
+    <div style="margin-top:14px">${workoutBodyHtml(resolved)}</div>
+    ${isRest
+      ? `<button class="btn btn-ghost" style="margin-top:16px" onclick="closeSheet()">Close</button>`
+      : `<button class="btn btn-ember" style="margin-top:16px" onclick="startWorkout('${t}', ${dow}, 'planned')">▶ Start workout</button>
+         <button class="btn btn-ghost" style="margin-top:10px" onclick="openLogSheet('${t}')">Log without timer</button>`}
+  `);
+}
+
+/* ---------------- Workout timer (follow-along player) ---------------- */
+let timerState = { accMs: 0, startAt: 0, running: false, iv: null, title: "" };
+
+function timerElapsedMs() {
+  return timerState.accMs + (timerState.running ? Date.now() - timerState.startAt : 0);
+}
+function fmtClock(ms) {
+  const s = Math.floor(ms / 1000);
+  const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = n => String(n).padStart(2, "0");
+  return hh > 0 ? `${hh}:${p(mm)}:${p(ss)}` : `${p(mm)}:${p(ss)}`;
+}
+function paintTimer() {
+  const el = document.getElementById("timerClock");
+  if (el) el.textContent = fmtClock(timerElapsedMs());
+}
+
+function startWorkout(title, dow, swapId) {
+  if (dow == null) dow = new Date().getDay();
+  if (!swapId) swapId = "planned";
+  timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: title || "Workout" };
+  const resolved = resolveSwap(WEEK_TEMPLATE[dow], swapId);
+  resolved.title = timerState.title;
+  renderTimerSheet(resolved);
+  timerState.iv = setInterval(paintTimer, 250);
+}
+
+function renderTimerSheet(resolved) {
+  mountSheet(`
+    <div class="eyebrow" style="text-align:center;margin-top:2px">Workout in progress</div>
+    <h2 style="text-align:center">${resolved.title}</h2>
+    <div class="timer-clock" id="timerClock">00:00</div>
+    <div class="timer-controls">
+      <button class="tbtn" id="tReset" title="Reset">↺</button>
+      <button class="tbtn tbtn-main" id="tToggle">Pause</button>
+      <button class="tbtn tbtn-finish" id="tFinish">Finish ✓</button>
+    </div>
+    <p class="muted" style="text-align:center;font-size:12.5px;margin:4px 0 6px">Timer keeps counting — follow the session below.</p>
+    <div class="timer-body">${workoutBodyHtml(resolved)}</div>
+  `);
+  document.getElementById("tToggle").addEventListener("click", toggleTimer);
+  document.getElementById("tReset").addEventListener("click", resetTimer);
+  document.getElementById("tFinish").addEventListener("click", finishWorkout);
+  paintTimer();
+}
+function toggleTimer() {
+  const btn = document.getElementById("tToggle");
+  if (timerState.running) {
+    timerState.accMs = timerElapsedMs(); timerState.running = false;
+    clearInterval(timerState.iv); timerState.iv = null; btn.textContent = "Resume";
+    btn.classList.add("paused");
+  } else {
+    timerState.startAt = Date.now(); timerState.running = true;
+    timerState.iv = setInterval(paintTimer, 250); btn.textContent = "Pause";
+    btn.classList.remove("paused");
+  }
+}
+function resetTimer() {
+  timerState.accMs = 0; timerState.startAt = Date.now();
+  const btn = document.getElementById("tToggle");
+  if (!timerState.running) { timerState.running = true; timerState.iv = setInterval(paintTimer, 250); if (btn) { btn.textContent = "Pause"; btn.classList.remove("paused"); } }
+  paintTimer();
+}
+function stopTimer() { clearInterval(timerState.iv); timerState.iv = null; timerState.running = false; }
+function finishWorkout() {
+  const mins = Math.max(1, Math.round(timerElapsedMs() / 60000));
+  stopTimer();
+  const title = timerState.title;
+  openLogSheet(title, { duration: mins });
+  toast(`Nice — ${mins} min logged to the timer`);
 }
 
 /* ---------------- Check-in sheet ---------------- */
@@ -291,7 +387,8 @@ function openSwap() {
 
 /* ---------------- LOG sheet ---------------- */
 let logDraft = {};
-function openLogSheet(presetTitle) {
+function openLogSheet(presetTitle, prefill) {
+  prefill = prefill || {};
   const plan = WEEK_TEMPLATE[new Date().getDay()];
   logDraft = { type: "run", title: presetTitle || plan.title, weather: null, mood: null, date: todayKey() };
   mountSheet(`
@@ -314,7 +411,7 @@ function openLogSheet(presetTitle) {
 
     <div class="field-row">
       <div class="field"><label>Distance (km)</label><input id="f_distance" class="mono" inputmode="decimal" placeholder="12.0" /></div>
-      <div class="field"><label>Duration (min)</label><input id="f_duration" class="mono" inputmode="numeric" placeholder="60" /></div>
+      <div class="field"><label>Duration (min)</label><input id="f_duration" class="mono" inputmode="numeric" placeholder="60" value="${prefill.duration || ""}" /></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Avg pace (/km)</label><input id="f_pace" class="mono" placeholder="4:50" /></div>
@@ -373,10 +470,11 @@ function renderPlan() {
     if (p.strength) tags.push(`<span class="pill">strength</span>`);
     if (/Interval|Long|Tempo|Speed/.test(p.title)) tags.push(`<span class="pill hard">key session</span>`);
     if (isRest) tags.push(`<span class="pill go">recovery</span>`);
-    return `<div class="day-card ${isToday ? "is-today" : ""} ${isRest ? "is-rest" : ""}">
+    return `<button class="day-card ${isToday ? "is-today" : ""} ${isRest ? "is-rest" : ""}" onclick="openDayDetail(${dow})" style="width:100%;text-align:left;border:${isToday ? "1px solid var(--ember)" : "1px solid var(--line)"};font:inherit;cursor:pointer">
       <div class="day-badge"><span class="dd">${p.day.slice(0,3)}</span><span class="di">${icon.slice(0,2)}</span></div>
       <div class="day-body"><h4>${p.title}</h4><p>${p.focus}</p><div class="day-tags">${tags.join("")}</div></div>
-    </div>`;
+      <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:var(--ink-3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none"><path d="M9 6l6 6-6 6"/></svg>
+    </button>`;
   }).join("");
 
   view.innerHTML = `
@@ -553,7 +651,7 @@ function toast(msg) {
 function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // expose for inline onclick
-Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal });
+Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal, openDayDetail, startWorkout, closeSheet });
 
 /* ---------------- Boot ---------------- */
 try {

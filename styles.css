@@ -236,6 +236,26 @@ body {
 .scale button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); transform: scale(1.04); }
 .scale button.on.crit { background: var(--ember); border-color: var(--ember); }
 
+/* ---------- Workout timer ---------- */
+.timer-clock {
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 68px; letter-spacing: -.02em; text-align: center;
+  color: var(--ember); line-height: 1; margin: 14px 0 18px;
+  font-variant-numeric: tabular-nums;
+}
+.timer-controls { display: flex; gap: 10px; align-items: stretch; }
+.tbtn {
+  border: 1.5px solid var(--line-2); background: var(--card); color: var(--ink);
+  border-radius: 13px; font-family: var(--font-body); font-weight: 700; font-size: 16px;
+  padding: 15px 0; cursor: pointer; flex: none; width: 58px; display: grid; place-items: center;
+  transition: transform .08s ease;
+}
+.tbtn:active { transform: scale(.96); }
+.tbtn-main { flex: 1; width: auto; background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tbtn-main.paused { background: var(--moss); border-color: var(--moss); }
+.tbtn-finish { flex: 1; width: auto; background: var(--ember); color: #fff; border-color: var(--ember); }
+.timer-body { margin-top: 8px; }
+
 /* ---------- Log form ---------- */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 7px; }
