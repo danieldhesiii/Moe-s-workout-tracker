@@ -2,7 +2,10 @@
    Moe's Training Log — plan & exercise data
    Advanced marathon runner, knee-safe, strength + running blend.
    Injury prevention is the non-negotiable constraint.
+   Wrapped in an IIFE so these identifiers stay private and don't
+   collide with app.js's globals — only window.MOE_DATA is exposed.
    ============================================================ */
+(function () {
 
 const KNEE_REHAB = [
   { name: "Spanish squat (band)", sets: "3", target: "45s hold", note: "VMO + patellar tendon load, knee-safe isometric" },
@@ -115,3 +118,5 @@ const WEATHER_OPTS = ["☀️ Clear", "⛅ Cloudy", "🌧️ Rain", "❄️ Cold
 const MOOD_OPTS = ["😖", "😕", "😐", "🙂", "😄"];
 
 window.MOE_DATA = { WEEK_TEMPLATE, CHECKIN_QUESTIONS, SWAP_OPTIONS, WEATHER_OPTS, MOOD_OPTS, KNEE_REHAB };
+
+})();
