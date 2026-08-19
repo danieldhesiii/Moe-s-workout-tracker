@@ -1,26 +1,29 @@
 /* ============================================================
    Moe's Training Log — styles
-   Design: analog training journal meets sports-science.
-   Warm paper, ink, single ember accent, mono numbers.
-   Deliberately NOT the generic AI gradient look.
+   Design: risograph / zine training journal.
+   Blush paper, plum ink, rose-magenta accent, mono numbers.
+   Deliberately NOT the generic AI pink (no lavender gradients,
+   no glassmorphism, no bubblegum SaaS) — flat print colour blocking.
    ============================================================ */
 
 :root {
-  --paper: #f4f1ea;
-  --paper-2: #ece7db;
-  --card: #fffdf8;
-  --ink: #1c1a17;
-  --ink-2: #4b463e;
-  --ink-3: #8a8377;
-  --line: #ddd6c7;
-  --line-2: #cfc7b4;
-  --ember: #c8442a;      /* accent — clay red */
-  --ember-soft: #f3ddd4;
-  --moss: #4f6642;       /* good / go */
-  --moss-soft: #e2e9dc;
-  --amber: #b5822a;      /* caution */
-  --amber-soft: #f2e6cd;
-  --shadow: 0 1px 2px rgba(28,26,23,.06), 0 8px 24px rgba(28,26,23,.05);
+  /* Two-tone pink: baby-pink surfaces, magenta ink (= the button colour).
+     Cards sit lighter than the page so magenta type stays readable. */
+  --paper: #ffd8e6;      /* baby pink — page background */
+  --paper-2: #ffc7db;    /* deeper baby pink — inset surfaces */
+  --card: #fff2f7;       /* lightest pink, near-white — for contrast */
+  --ink: #c72f5c;        /* rose-magenta — text = "Start check-in" button */
+  --ink-2: #b34368;      /* secondary text */
+  --ink-3: #b05576;      /* muted captions (still readable) */
+  --line: #f0bccd;
+  --line-2: #e6a4bb;
+  --ember: #c72f5c;      /* accent = same magenta as the ink */
+  --ember-soft: #ffd6e4;
+  --moss: #b0325f;       /* good / go — deep rose (kept two-tone) */
+  --moss-soft: #ffd0e0;
+  --amber: #c85a7d;      /* caution — mid rose */
+  --amber-soft: #ffdfeb;
+  --shadow: 0 1px 2px rgba(150,30,70,.07), 0 8px 24px rgba(150,30,70,.08);
   --radius: 16px;
   --radius-sm: 11px;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -41,8 +44,8 @@ body {
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
   background-image:
-    radial-gradient(circle at 15% 10%, rgba(200,68,42,.03), transparent 40%),
-    radial-gradient(circle at 85% 90%, rgba(79,102,66,.03), transparent 40%);
+    radial-gradient(circle at 15% 10%, rgba(199,47,92,.05), transparent 42%),
+    radial-gradient(circle at 85% 90%, rgba(199,47,92,.04), transparent 42%);
 }
 
 #app {
@@ -293,7 +296,7 @@ body {
 .bars { display: flex; align-items: flex-end; gap: 7px; height: 120px; margin-top: 8px; padding-top: 10px; }
 .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
 .bar {
-  width: 100%; background: linear-gradient(var(--ember), #d9694f); border-radius: 6px 6px 3px 3px; min-height: 4px;
+  width: 100%; background: linear-gradient(var(--ember), #e0698f); border-radius: 6px 6px 3px 3px; min-height: 4px;
   transition: height .5s cubic-bezier(.2,.8,.2,1);
 }
 .bar.rest { background: var(--line-2); }
