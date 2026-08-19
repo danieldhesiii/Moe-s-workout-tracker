@@ -274,44 +274,71 @@ function paintTimer() {
   if (el) el.textContent = fmtClock(timerElapsedMs());
 }
 
+function buildSteps(resolved) {
+  const steps = [];
+  if (resolved.run) steps.push({ name: resolved.run.label, target: resolved.run.target, note: resolved.run.intensity });
+  if (resolved.strength) for (const ex of resolved.strength.block) steps.push({ name: ex.name, target: `${ex.sets}×${ex.target}`, note: ex.note });
+  return steps;
+}
+
 function startWorkout(title, dow, swapId) {
   if (dow == null) dow = new Date().getDay();
   if (!swapId) swapId = "planned";
-  timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: title || "Workout" };
   const resolved = resolveSwap(WEEK_TEMPLATE[dow], swapId);
-  resolved.title = timerState.title;
+  resolved.title = title || resolved.title;
+  timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: resolved.title, steps: buildSteps(resolved), done: [] };
+  timerState.done = new Array(timerState.steps.length).fill(false);
   renderTimerSheet(resolved);
   timerState.iv = setInterval(paintTimer, 250);
 }
 
+function stepsHtml() {
+  if (!timerState.steps.length) return `<p class="muted" style="font-size:13px">Rest/recovery — no exercises to check off. Great job showing up.</p>`;
+  return timerState.steps.map((s, i) => `
+    <button class="chk-row ${timerState.done[i] ? "done" : ""}" onclick="toggleStep(${i})">
+      <span class="chk-box">${timerState.done[i] ? "✓" : ""}</span>
+      <span class="chk-main"><span class="chk-name">${s.name}</span>${s.note ? `<span class="chk-note">${s.note}</span>` : ""}</span>
+      <span class="chk-target">${s.target || ""}</span>
+    </button>`).join("");
+}
+function paintSteps() {
+  const wrap = document.getElementById("timerSteps"); if (wrap) wrap.innerHTML = stepsHtml();
+  const n = timerState.done.filter(Boolean).length, t = timerState.steps.length;
+  const pr = document.getElementById("timerProg"); if (pr) pr.style.width = (t ? (n / t) * 100 : 0) + "%";
+  const pl = document.getElementById("timerProgLbl"); if (pl) pl.textContent = `${n} / ${t} done`;
+}
+function toggleStep(i) { timerState.done[i] = !timerState.done[i]; paintSteps(); }
+
 function renderTimerSheet(resolved) {
+  const t = timerState.steps.length;
   mountSheet(`
     <div class="eyebrow" style="text-align:center;margin-top:2px">Workout in progress</div>
     <h2 style="text-align:center">${resolved.title}</h2>
     <div class="timer-clock" id="timerClock">00:00</div>
     <div class="timer-controls">
-      <button class="tbtn" id="tReset" title="Reset">↺</button>
+      <button class="tbtn" id="tReset" title="Reset timer">↺</button>
       <button class="tbtn tbtn-main" id="tToggle">Pause</button>
-      <button class="tbtn tbtn-finish" id="tFinish">Finish ✓</button>
     </div>
-    <p class="muted" style="text-align:center;font-size:12.5px;margin:4px 0 6px">Timer keeps counting — follow the session below.</p>
-    <div class="timer-body">${workoutBodyHtml(resolved)}</div>
+    ${t ? `<div class="timer-prog"><div class="timer-prog-top"><span class="eyebrow" style="margin:0">Follow along</span><span class="mono" id="timerProgLbl" style="font-size:12px;color:var(--ink-2)">0 / ${t} done</span></div>
+      <div class="g-bar-track"><div class="g-bar-fill" id="timerProg" style="width:0%"></div></div></div>` : ""}
+    <div class="timer-steps" id="timerSteps">${stepsHtml()}</div>
+    <button class="btn btn-ember" id="tFinish" style="margin-top:16px">Finish &amp; log</button>
+    <button class="btn btn-ghost" id="tLogNow" style="margin-top:10px">Log now (keep timer running)</button>
   `);
   document.getElementById("tToggle").addEventListener("click", toggleTimer);
   document.getElementById("tReset").addEventListener("click", resetTimer);
-  document.getElementById("tFinish").addEventListener("click", finishWorkout);
+  document.getElementById("tFinish").addEventListener("click", () => logFromTimer(true));
+  document.getElementById("tLogNow").addEventListener("click", () => logFromTimer(false));
   paintTimer();
 }
 function toggleTimer() {
   const btn = document.getElementById("tToggle");
   if (timerState.running) {
     timerState.accMs = timerElapsedMs(); timerState.running = false;
-    clearInterval(timerState.iv); timerState.iv = null; btn.textContent = "Resume";
-    btn.classList.add("paused");
+    clearInterval(timerState.iv); timerState.iv = null; btn.textContent = "Resume"; btn.classList.add("paused");
   } else {
     timerState.startAt = Date.now(); timerState.running = true;
-    timerState.iv = setInterval(paintTimer, 250); btn.textContent = "Pause";
-    btn.classList.remove("paused");
+    timerState.iv = setInterval(paintTimer, 250); btn.textContent = "Pause"; btn.classList.remove("paused");
   }
 }
 function resetTimer() {
@@ -321,12 +348,15 @@ function resetTimer() {
   paintTimer();
 }
 function stopTimer() { clearInterval(timerState.iv); timerState.iv = null; timerState.running = false; }
-function finishWorkout() {
+
+// finish=true → stop timer & close the player; finish=false → log on top, timer keeps running
+function logFromTimer(finish) {
   const mins = Math.max(1, Math.round(timerElapsedMs() / 60000));
-  stopTimer();
-  const title = timerState.title;
-  openLogSheet(title, { duration: mins });
-  toast(`Nice — ${mins} min logged to the timer`);
+  const doneNames = timerState.steps.filter((_, i) => timerState.done[i]).map(s => s.name);
+  const notes = doneNames.length ? "Completed: " + doneNames.join(", ") : "";
+  const prefill = { duration: mins, notes };
+  if (finish) { stopTimer(); closeSheet(); openLogSheet(timerState.title, prefill); }
+  else { openLogSheet(timerState.title, prefill, { onSaved: () => toast("Logged — timer still running ⏱") }); }
 }
 
 /* ---------------- Check-in sheet ---------------- */
@@ -387,8 +417,8 @@ function openSwap() {
 
 /* ---------------- LOG sheet ---------------- */
 let logDraft = {};
-function openLogSheet(presetTitle, prefill) {
-  prefill = prefill || {};
+function openLogSheet(presetTitle, prefill, opts) {
+  prefill = prefill || {}; opts = opts || {};
   const plan = WEEK_TEMPLATE[new Date().getDay()];
   logDraft = { type: "run", title: presetTitle || plan.title, weather: null, mood: null, date: todayKey() };
   mountSheet(`
@@ -407,7 +437,7 @@ function openLogSheet(presetTitle, prefill) {
     <div class="field"><label>Title</label><input id="f_title" value="${(logDraft.title || "").replace(/"/g, "")}" /></div>
 
     <div class="field"><label>Notes — how did it feel?</label>
-      <textarea id="f_notes" placeholder="Legs, knees, breathing, anything worth remembering…"></textarea></div>
+      <textarea id="f_notes" placeholder="Legs, knees, breathing, anything worth remembering…">${(prefill.notes || "").replace(/</g, "&lt;")}</textarea></div>
 
     <div class="field-row">
       <div class="field"><label>Distance (km)</label><input id="f_distance" class="mono" inputmode="decimal" placeholder="12.0" /></div>
@@ -453,7 +483,8 @@ function openLogSheet(presetTitle, prefill) {
     const g0 = state.goals[0];
     if (g0 && entry.distance) g0.progress = Math.min(100, (g0.progress || 0) + entry.distance / 4);
     save(); closeSheet();
-    currentTab = "progress"; render(); toast("Session logged 💪");
+    if (opts.onSaved) { opts.onSaved(entry); }        // stacked over a running timer — stay put
+    else { currentTab = "progress"; render(); toast("Session logged 💪"); }
   });
 }
 
@@ -617,12 +648,18 @@ function openGoalSheet() {
 
 /* ---------------- Sheet + helpers ---------------- */
 const sheetRoot = document.getElementById("sheet-root");
+// Sheets stack — a log sheet can open over a running timer, then close back to it.
 function mountSheet(inner) {
-  sheetRoot.innerHTML = `<div class="sheet-backdrop"><div class="sheet"><div class="sheet-grip"></div>${inner}</div></div>`;
-  const bd = sheetRoot.querySelector(".sheet-backdrop");
-  bd.addEventListener("click", e => { if (e.target === bd) closeSheet(); });
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-backdrop";
+  wrap.innerHTML = `<div class="sheet"><div class="sheet-grip"></div>${inner}</div>`;
+  wrap.addEventListener("click", e => { if (e.target === wrap) closeSheet(); });
+  sheetRoot.appendChild(wrap);
 }
-function closeSheet() { sheetRoot.innerHTML = ""; }
+function closeSheet() {
+  const backs = sheetRoot.querySelectorAll(".sheet-backdrop");
+  if (backs.length) backs[backs.length - 1].remove();
+}
 
 function bindSeg(id, attr, cb) {
   const el = document.getElementById(id); if (!el) return;
@@ -651,7 +688,7 @@ function toast(msg) {
 function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // expose for inline onclick
-Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal, openDayDetail, startWorkout, closeSheet });
+Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal, openDayDetail, startWorkout, closeSheet, toggleStep });
 
 /* ---------------- Boot ---------------- */
 try {

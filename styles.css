@@ -255,6 +255,27 @@ body {
 .tbtn-main.paused { background: var(--moss); border-color: var(--moss); }
 .tbtn-finish { flex: 1; width: auto; background: var(--ember); color: #fff; border-color: var(--ember); }
 .timer-body { margin-top: 8px; }
+.timer-prog { margin: 16px 0 10px; }
+.timer-prog-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.timer-steps { display: flex; flex-direction: column; gap: 8px; }
+.chk-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--card); border: 1.5px solid var(--line-2); border-radius: 13px;
+  padding: 13px 14px; font: inherit; color: var(--ink); cursor: pointer; transition: all .12s;
+}
+.chk-row:active { transform: scale(.99); }
+.chk-box {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; border: 2px solid var(--line-2);
+  display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 15px; background: transparent;
+}
+.chk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.chk-name { font-weight: 600; font-size: 14.5px; }
+.chk-note { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.chk-target { font-family: var(--font-mono); font-size: 13px; color: var(--ember); font-weight: 600; white-space: nowrap; }
+.chk-row.done { background: var(--ember-soft); border-color: var(--ember); }
+.chk-row.done .chk-box { background: var(--ember); border-color: var(--ember); }
+.chk-row.done .chk-name { text-decoration: line-through; color: var(--ink-3); }
+.chk-row.done .chk-target { color: var(--ink-3); }
 
 /* ---------- Log form ---------- */
 .field { margin-bottom: 16px; }
