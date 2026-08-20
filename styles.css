@@ -400,18 +400,18 @@ body {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
   width: 100%; max-width: 480px; z-index: 30;
   display: flex; justify-content: space-around; align-items: center;
-  padding: 8px 8px calc(8px + var(--safe-bot));
+  padding: 6px 4px calc(6px + var(--safe-bot));
   background: rgba(244,241,234,.9);
   backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
   border-top: 1px solid var(--line);
 }
 .tab {
   border: none; background: transparent; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  color: var(--ink-3); font-size: 10.5px; font-weight: 600; padding: 6px 10px; border-radius: 12px;
-  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  color: var(--ink-3); font-size: 9.5px; font-weight: 600; padding: 5px 4px; border-radius: 10px;
+  flex: 1; min-width: 0;
 }
-.tab-ic { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.tab-ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .tab.active { color: var(--ember); }
 .tab-log .tab-ic { stroke-width: 2.4; }
 .tab-log.active { color: var(--paper); }
