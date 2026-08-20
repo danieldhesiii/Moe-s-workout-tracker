@@ -20,14 +20,68 @@ const defaultState = () => ({
 
 let state = load();
 
+function ensureShape(s) {
+  s = s || {};
+  s.checkins = s.checkins || {};
+  s.sessions = s.sessions || [];
+  s.goals = s.goals || defaultState().goals;
+  s.plan = s.plan || {};
+  s.settings = s.settings || { weeklyTarget: 75 };
+  return s;
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return seedDemo(defaultState());
-    return JSON.parse(raw);
+    return ensureShape(JSON.parse(raw));
   } catch { return defaultState(); }
 }
-function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));   // instant offline cache
+  if (sb && syncReady) pushRemote();                        // debounced cloud sync
+}
+
+/* ---------------- Cloud sync (Supabase) ---------------- */
+let sb = null, syncReady = false, syncTimer = null;
+
+function initSync() {
+  const cfg = window.MOE_CONFIG;
+  if (!cfg || !window.supabase) { console.warn("[sync] Supabase unavailable — running local-only"); return; }
+  try { sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: false } }); }
+  catch (e) { console.warn("[sync] init failed", e); return; }
+  pullRemote();
+}
+
+async function pullRemote() {
+  const cfg = window.MOE_CONFIG;
+  try {
+    const { data, error } = await sb.from(cfg.table).select("data").eq("id", cfg.rowId).maybeSingle();
+    if (error) { console.warn("[sync] pull error", error.message); return; }
+    if (data && data.data && Object.keys(data.data).length) {
+      state = ensureShape(data.data);                       // cloud is source of truth across devices
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      syncReady = true;
+      render();
+      toast("Synced from cloud ☁️");
+    } else {
+      syncReady = true;                                     // first run — seed the cloud from local
+      pushRemote(true);
+    }
+  } catch (e) { console.warn("[sync] pull failed", e); }
+}
+
+function pushRemote(immediate) {
+  if (!sb) return;
+  const cfg = window.MOE_CONFIG;
+  const doPush = async () => {
+    try {
+      const { error } = await sb.from(cfg.table).upsert({ id: cfg.rowId, data: state, updated_at: new Date().toISOString() });
+      if (error) console.warn("[sync] push error", error.message);
+    } catch (e) { console.warn("[sync] push failed", e); }
+  };
+  clearTimeout(syncTimer);
+  if (immediate) doPush(); else syncTimer = setTimeout(doPush, 700);   // debounce bursts of saves
+}
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function todayKey() { return new Date().toISOString().slice(0, 10); }
@@ -811,11 +865,12 @@ Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delS
 
 /* ---------------- Boot ---------------- */
 try {
-  render();
+  render();          // paint immediately from local cache (instant, offline-safe)
+  initSync();        // then reconcile with the cloud
 } catch (err) {
   console.error("Boot failed:", err);
   // Never leave a blank screen — reset corrupt state and retry once.
-  try { localStorage.removeItem(STORE_KEY); state = defaultState(); render(); }
+  try { localStorage.removeItem(STORE_KEY); state = defaultState(); render(); initSync(); }
   catch (e2) {
     view.innerHTML = `<div class="empty"><div class="e-emoji">🛠️</div><p>Something glitched loading your data.<br>Tap below to reset and start fresh.</p><button class="btn btn-ember" style="margin-top:14px;width:auto" onclick="localStorage.clear();location.reload()">Reset app</button></div>`;
   }
