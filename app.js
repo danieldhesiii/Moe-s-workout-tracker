@@ -11,7 +11,7 @@ const { WEEK_TEMPLATE, CHECKIN_QUESTIONS, SWAP_OPTIONS, WEATHER_OPTS, MOOD_OPTS,
 const STORE_KEY = 'moe_training_log_v1';
 const AGE = 29;
 const MAX_HR = 220 - AGE; // 191 bpm
-const TAB_ORDER = ['today', 'plan', 'progress', 'goals'];
+const TAB_ORDER = ['today', 'plan', 'progress', 'goals', 'library'];
 
 /* --------------- State --------------- */
 const defaultState = () => ({
@@ -26,6 +26,7 @@ const defaultState = () => ({
   weeklyNotes: {},
   customRuns: [],    // [{id, label, style, target, intensity, pace, coach, custom:true}]
   customStr: [],     // [{id, label, block:[{name,sets,target,note}], custom:true}]
+  savedEx: [],       // [{id, name, sets, target, note, category}]
 });
 
 let state = load();
@@ -41,6 +42,7 @@ function ensureShape(s) {
   s.weeklyNotes = s.weeklyNotes || {};
   s.customRuns  = s.customRuns  || [];
   s.customStr   = s.customStr   || [];
+  s.savedEx     = s.savedEx     || [];   // individual saved exercises
   return s;
 }
 
@@ -320,7 +322,7 @@ view.addEventListener('touchend', e => {
 
 function render() {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
-  ({ today: renderToday, plan: renderPlan, log: () => openLogSheet(), progress: renderProgress, goals: renderGoals }[currentTab] || renderToday)();
+  ({ today: renderToday, plan: renderPlan, log: () => openLogSheet(), progress: renderProgress, goals: renderGoals, library: renderLibrary }[currentTab] || renderToday)();
   updateHeader();
 }
 
@@ -974,11 +976,12 @@ function allStrBlocks() { return [...LIB_STRENGTH, ...(state.customStr || [])]; 
 /* --------------- Create custom session --------------- */
 function openCreateCustom() {
   mountSheet(`
-    <h2>Create custom session</h2>
-    <p class="sub">Build your own run or strength block. It will appear in your library and you can assign it to any day.</p>
+    <h2>Create custom</h2>
+    <p class="sub">Build your own run, strength block, or save a single exercise for reuse.</p>
     <div class="seg" id="customTypeSeg" style="margin-bottom:18px">
-      <button data-ct="run" class="on">Run session</button>
+      <button data-ct="run" class="on">Run</button>
       <button data-ct="strength">Strength block</button>
+      <button data-ct="exercise">Exercise</button>
     </div>
     <div id="customForm">${customRunForm()}</div>
   `);
@@ -986,16 +989,27 @@ function openCreateCustom() {
     const b = e.target.closest('button'); if (!b) return;
     document.getElementById('customTypeSeg').querySelectorAll('button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
-    document.getElementById('customForm').innerHTML = b.dataset.ct === 'run' ? customRunForm() : customStrForm();
-    bindCustomStrExercises();
+    const ct = b.dataset.ct;
+    document.getElementById('customForm').innerHTML =
+      ct === 'run' ? customRunForm() : ct === 'strength' ? customStrForm() : customExerciseForm();
+    if (ct === 'strength') initCustomStrBuilder();
+    if (ct === 'run') document.getElementById('crSave')?.addEventListener('click', saveCustomRun);
+    if (ct === 'exercise') {
+      document.getElementById('cexSave')?.addEventListener('click', saveCustomExercise);
+      document.getElementById('cex_catSeg')?.addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        document.getElementById('cex_catSeg').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      });
+    }
   });
-  bindCustomStrExercises();
+  document.getElementById('crSave')?.addEventListener('click', saveCustomRun);
 }
 
 function customRunForm() {
   return `
     <div class="field"><label>Session name</label><input id="cr_label" placeholder="e.g. Trail Run" /></div>
-    <div class="field"><label>Target (distance or time)</label><input id="cr_target" placeholder="e.g. 15 km or 60 min" /></div>
+    <div class="field"><label>Target</label><input id="cr_target" placeholder="e.g. 15 km or 60 min" /></div>
     <div class="field"><label>Style</label>
       <div class="seg" id="cr_styleSeg">
         <button data-s="distance" class="on">Distance</button>
@@ -1012,51 +1026,137 @@ function customStrForm() {
   return `
     <div class="field"><label>Block name</label><input id="cs_label" placeholder="e.g. Full-body circuit" /></div>
     <div id="cs_exList"></div>
-    <button class="btn btn-ghost" id="cs_addEx" style="margin-bottom:14px">＋ Add exercise</button>
-    <button class="btn btn-ember" id="csSave">Save to library</button>`;
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn btn-ghost" id="cs_addEx" style="flex:1;font-size:13.5px">＋ Type new</button>
+      <button class="btn btn-ghost" id="cs_pickEx" style="flex:1;font-size:13.5px">📚 Pick saved</button>
+    </div>
+    <button class="btn btn-ember" id="csSave">Save block to library</button>`;
 }
 
+const EX_CATS = ['strength', 'rehab', 'mobility', 'plyometric', 'core', 'cardio'];
+function customExerciseForm() {
+  return `
+    <div class="field"><label>Exercise name</label><input id="cex_name" placeholder="e.g. Nordic curl" /></div>
+    <div class="field-row">
+      <div class="field"><label>Default sets</label><input id="cex_sets" class="mono" placeholder="3" /></div>
+      <div class="field"><label>Default target</label><input id="cex_target" placeholder="8 reps / 30s" /></div>
+    </div>
+    <div class="field"><label>Category</label>
+      <div class="seg" id="cex_catSeg" style="flex-wrap:wrap;gap:4px">
+        ${EX_CATS.map((c, i) => `<button data-c="${c}" class="${i === 0 ? 'on' : ''}" style="flex:none;padding:8px 12px">${c}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field"><label>Coaching note — optional</label><input id="cex_note" placeholder="Cue, form tip, why it matters…" /></div>
+    <button class="btn btn-ember" id="cexSave">Save exercise</button>`;
+}
+
+/* --- Strength block builder --- */
 let customExercises = [];
-function bindCustomStrExercises() {
-  const addBtn = document.getElementById('cs_addEx');
-  if (!addBtn) return;
-  customExercises = [{ name: '', sets: '3', target: '', note: '' }];
+function initCustomStrBuilder() {
+  customExercises = [];
   renderCustomExList();
-  addBtn.addEventListener('click', () => {
+  document.getElementById('cs_addEx')?.addEventListener('click', () => {
     customExercises.push({ name: '', sets: '3', target: '', note: '' });
     renderCustomExList();
   });
-  const saveBtn = document.getElementById('csSave');
-  if (saveBtn) saveBtn.addEventListener('click', saveCustomStr);
-  const saveBtnRun = document.getElementById('crSave');
-  if (saveBtnRun) saveBtnRun.addEventListener('click', saveCustomRun);
+  document.getElementById('cs_pickEx')?.addEventListener('click', openExercisePicker);
+  document.getElementById('csSave')?.addEventListener('click', saveCustomStr);
 }
 
 function renderCustomExList() {
   const el = document.getElementById('cs_exList'); if (!el) return;
+  if (!customExercises.length) {
+    el.innerHTML = `<p class="muted" style="font-size:13px;text-align:center;padding:12px 0">No exercises yet — type one or pick from your saved library.</p>`;
+    rebindStrSave(); return;
+  }
   el.innerHTML = customExercises.map((ex, i) => `
-    <div class="custom-ex-row" data-i="${i}">
-      <div class="field" style="margin-bottom:8px"><label>Exercise ${i+1} name</label><input class="cex-name" data-i="${i}" value="${escapeHtml(ex.name)}" placeholder="e.g. Hip thrust" /></div>
-      <div class="field-row" style="margin-bottom:8px">
-        <div class="field"><label>Sets</label><input class="cex-sets" data-i="${i}" value="${ex.sets}" class="mono" style="width:100%" /></div>
-        <div class="field"><label>Target</label><input class="cex-target" data-i="${i}" value="${escapeHtml(ex.target)}" placeholder="12 reps / 30s" /></div>
+    <div class="custom-ex-row">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">Exercise ${i + 1}</span>
+        <div style="display:flex;gap:6px">
+          <button onclick="saveExFromBlock(${i})" style="border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink-3);padding:2px 4px" title="Save to exercise library">☆ Save</button>
+          ${customExercises.length > 1 ? `<button onclick="removeCustomEx(${i})" style="border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink-3);padding:2px 4px">✕</button>` : ''}
+        </div>
       </div>
-      <div class="field" style="margin-bottom:${i < customExercises.length - 1 ? '0' : '4'}px">
+      <div class="field" style="margin-bottom:7px"><input class="cex-name" data-i="${i}" value="${escapeHtml(ex.name)}" placeholder="Exercise name" /></div>
+      <div class="field-row" style="margin-bottom:7px">
+        <div class="field"><input class="cex-sets" data-i="${i}" value="${ex.sets}" placeholder="Sets" class="mono" /></div>
+        <div class="field"><input class="cex-target" data-i="${i}" value="${escapeHtml(ex.target)}" placeholder="e.g. 12 reps" /></div>
+      </div>
+      <div class="field" style="margin-bottom:0">
         <input class="cex-note" data-i="${i}" value="${escapeHtml(ex.note)}" placeholder="Coaching note — optional" />
       </div>
-      ${customExercises.length > 1 ? `<button onclick="removeCustomEx(${i})" style="border:none;background:none;color:var(--ink-3);cursor:pointer;font-size:12px;margin-bottom:12px;padding:0">✕ Remove</button>` : ''}
-      <hr style="border:none;border-top:1px solid var(--line);margin-bottom:12px">
     </div>`).join('');
-  // bind live inputs
   el.querySelectorAll('.cex-name').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].name = e.target.value; }));
   el.querySelectorAll('.cex-sets').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].sets = e.target.value; }));
   el.querySelectorAll('.cex-target').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].target = e.target.value; }));
   el.querySelectorAll('.cex-note').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].note = e.target.value; }));
-  // re-bind save
-  const saveBtn = document.getElementById('csSave'); if (saveBtn) saveBtn.addEventListener('click', saveCustomStr);
+  rebindStrSave();
+}
+
+function rebindStrSave() {
+  document.getElementById('csSave')?.addEventListener('click', saveCustomStr);
 }
 
 function removeCustomEx(i) { customExercises.splice(i, 1); renderCustomExList(); }
+
+/* Save an exercise from the block builder into the saved exercise library */
+function saveExFromBlock(i) {
+  const ex = customExercises[i];
+  if (!ex?.name?.trim()) { toast('Name the exercise first'); return; }
+  state.savedEx = state.savedEx || [];
+  if (state.savedEx.some(e => e.name.toLowerCase() === ex.name.trim().toLowerCase())) { toast('Already in your exercise library'); return; }
+  state.savedEx.push({ id: 'ex_' + uid(), name: ex.name.trim(), sets: ex.sets || '3', target: ex.target.trim() || '10 reps', note: ex.note.trim(), category: 'strength' });
+  save(); toast(`"${ex.name.trim()}" saved to exercise library ⭐`);
+}
+
+/* Exercise picker — lets you pull from saved + built-in exercises into a block */
+function openExercisePicker() {
+  // collect all built-in exercises from strength blocks + knee rehab
+  const builtIn = [];
+  const seen = new Set();
+  const addEx = (ex, src) => { if (!seen.has(ex.name)) { seen.add(ex.name); builtIn.push({ ...ex, _src: src }); } };
+  for (const b of LIB_STRENGTH) for (const ex of b.block) addEx(ex, b.label);
+  for (const ex of window.MOE_DATA.KNEE_REHAB) addEx(ex, 'Knee Rehab');
+
+  const savedRows = (state.savedEx || []).map(ex => `
+    <button class="lib-card ex-pick-btn" data-name="${escapeHtml(ex.name)}" data-sets="${ex.sets}" data-target="${escapeHtml(ex.target)}" data-note="${escapeHtml(ex.note)}">
+      <div class="lc-left"><div class="lc-body">
+        <div class="lc-name">${ex.name} <span class="custom-badge">${ex.category}</span></div>
+        <div class="lc-meta">${ex.sets}×${ex.target}</div>
+      </div></div>
+      <span style="color:var(--ember);font-weight:700;font-size:18px">+</span>
+    </button>`).join('');
+
+  const builtInRows = builtIn.map(ex => `
+    <button class="lib-card ex-pick-btn" data-name="${escapeHtml(ex.name)}" data-sets="${ex.sets}" data-target="${escapeHtml(ex.target)}" data-note="${escapeHtml(ex.note || '')}">
+      <div class="lc-left"><div class="lc-body">
+        <div class="lc-name">${ex.name}</div>
+        <div class="lc-meta">${ex.sets}×${ex.target}${ex._src ? ' · ' + ex._src : ''}</div>
+      </div></div>
+      <span style="color:var(--ember);font-weight:700;font-size:18px">+</span>
+    </button>`).join('');
+
+  mountSheet(`
+    <h2>Pick exercises</h2>
+    <p class="sub">Tap to add to your block. You can add multiple.</p>
+    ${savedRows ? `<div class="eyebrow" style="margin:14px 0 10px">⭐ Your saved exercises</div><div class="lib-card-list">${savedRows}</div>` : ''}
+    <div class="eyebrow" style="margin:${savedRows ? '20' : '14'}px 0 10px">Built-in exercises</div>
+    <div class="lib-card-list">${builtInRows}</div>
+  `);
+
+  document.querySelectorAll('.ex-pick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      customExercises.push({
+        name: btn.dataset.name, sets: btn.dataset.sets || '3',
+        target: btn.dataset.target || '10 reps', note: btn.dataset.note || '',
+      });
+      renderCustomExList();
+      closeSheet();
+      toast(`${btn.dataset.name} added`);
+    });
+  });
+}
 
 function saveCustomRun() {
   const g = id => (document.getElementById(id)?.value || '').trim();
@@ -1066,13 +1166,11 @@ function saveCustomRun() {
   const run = {
     id: 'custom_' + uid(), label: g('cr_label'), style, target: g('cr_target') || '—',
     intensity: g('cr_intensity') || 'Your pace', pace: g('cr_pace') || null,
-    coach: g('cr_coach') || 'Your custom session — listen to your body.',
-    custom: true,
+    coach: g('cr_coach') || 'Your custom session — listen to your body.', custom: true,
   };
   state.customRuns = state.customRuns || [];
   state.customRuns.push(run);
-  save(); closeSheet();
-  toast(`"${run.label}" added to library`);
+  save(); closeSheet(); toast(`"${run.label}" added to library`);
 }
 
 function saveCustomStr() {
@@ -1081,20 +1179,34 @@ function saveCustomStr() {
   const validEx = customExercises.filter(e => e.name.trim());
   if (!validEx.length) { toast('Add at least one exercise'); return; }
   const block = validEx.map(e => ({ name: e.name.trim(), sets: e.sets || '3', target: e.target.trim() || '10 reps', note: e.note.trim() }));
-  const str = { id: 'custom_' + uid(), label, block, custom: true };
   state.customStr = state.customStr || [];
-  state.customStr.push(str);
-  save(); closeSheet();
-  toast(`"${label}" added to library`);
+  state.customStr.push({ id: 'custom_' + uid(), label, block, custom: true });
+  save(); closeSheet(); toast(`"${label}" saved to library`);
+}
+
+function saveCustomExercise() {
+  const g = id => (document.getElementById(id)?.value || '').trim();
+  if (!g('cex_name')) { toast('Give the exercise a name'); return; }
+  const catSeg = document.getElementById('cex_catSeg');
+  const cat = catSeg?.querySelector('.on')?.dataset.c || 'strength';
+  state.savedEx = state.savedEx || [];
+  if (state.savedEx.some(e => e.name.toLowerCase() === g('cex_name').toLowerCase())) { toast('Already saved'); return; }
+  state.savedEx.push({ id: 'ex_' + uid(), name: g('cex_name'), sets: g('cex_sets') || '3', target: g('cex_target') || '10 reps', note: g('cex_note'), category: cat });
+  save(); closeSheet(); toast(`"${g('cex_name')}" saved to exercise library`);
+}
+
+function deleteSavedEx(id) {
+  state.savedEx = (state.savedEx || []).filter(e => e.id !== id);
+  save(); closeSheet(); currentTab = 'library'; render();
 }
 
 function deleteCustomRun(id) {
   state.customRuns = (state.customRuns || []).filter(r => r.id !== id);
-  save(); closeSheet(); openLibrary();
+  save(); closeSheet(); currentTab = 'library'; render();
 }
 function deleteCustomStr(id) {
   state.customStr = (state.customStr || []).filter(s => s.id !== id);
-  save(); closeSheet(); openLibrary();
+  save(); closeSheet(); currentTab = 'library'; render();
 }
 
 /* --------------- PLAN tab --------------- */
@@ -1140,7 +1252,7 @@ function renderPlan() {
     <div class="card" style="padding:14px 16px">
       <p class="muted" style="font-size:13px;line-height:1.5;margin-bottom:14px">Browse all run sessions and strength blocks, start any session directly, or create your own custom ones.</p>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="openLibrary()">📚 Browse library</button>
+        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="currentTab='library';render()">📚 Browse library</button>
         <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="openCreateCustom()">＋ Create custom</button>
       </div>
     </div>
@@ -1566,6 +1678,104 @@ function toast(msg) {
 }
 function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+/* --------------- Library tab (inline view) --------------- */
+function renderLibrary() {
+  const makeRunRow = r => `
+    <button class="lib-card" onclick="openLibRun('${r.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">🏃‍♀️</div>
+        <div class="lc-body">
+          <div class="lc-name">${r.label}${r.custom ? ' <span class="custom-badge">custom</span>' : ''}</div>
+          <div class="lc-meta"><span class="mono" style="color:var(--ember)">${r.target}</span> · ${r.intensity}</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`;
+
+  const makeStrRow = s => `
+    <button class="lib-card" onclick="openLibStr('${s.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">🏋️</div>
+        <div class="lc-body">
+          <div class="lc-name">${s.label}${s.custom ? ' <span class="custom-badge">custom</span>' : ''}</div>
+          <div class="lc-meta">${s.block.length} exercise${s.block.length === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`;
+
+  const makeExRow = ex => `
+    <button class="lib-card" onclick="openSavedEx('${ex.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">💪</div>
+        <div class="lc-body">
+          <div class="lc-name">${ex.name} <span class="custom-badge">${ex.category}</span></div>
+          <div class="lc-meta">${ex.sets}×${ex.target}</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`;
+
+  const customRunSection = state.customRuns?.length
+    ? `<div class="eyebrow" style="margin:18px 0 10px">⭐ Your custom runs</div>
+       <div class="lib-card-list">${state.customRuns.map(makeRunRow).join('')}</div>` : '';
+
+  const customStrSection = state.customStr?.length
+    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your custom strength blocks</div>
+       <div class="lib-card-list">${state.customStr.map(makeStrRow).join('')}</div>` : '';
+
+  const savedExSection = state.savedEx?.length
+    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your saved exercises</div>
+       <div class="lib-card-list">${state.savedEx.map(makeExRow).join('')}</div>` : '';
+
+  const hasCustom = customRunSection || customStrSection || savedExSection;
+
+  view.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 2px">
+      <div class="section-title" style="margin:22px 2px 0">Library</div>
+      <button class="add-inline" style="margin-top:18px" onclick="openCreateCustom()">＋ Create</button>
+    </div>
+    <p style="font-size:13.5px;color:var(--ink-3);margin:6px 2px 18px;line-height:1.4">Browse every session and exercise. Tap to preview, start, or log it.</p>
+
+    ${hasCustom ? customRunSection + customStrSection + savedExSection : ''}
+
+    <div class="eyebrow" style="margin:${hasCustom ? '20' : '0'}px 0 10px">🏃‍♀️ Run sessions</div>
+    <div class="lib-card-list">${LIB_RUNS.map(makeRunRow).join('')}</div>
+
+    <div class="eyebrow" style="margin:20px 0 10px">🏋️ Strength blocks</div>
+    <div class="lib-card-list">${LIB_STRENGTH.map(makeStrRow).join('')}</div>
+
+    <div class="eyebrow" style="margin:20px 0 10px">🩹 Rehab & recovery</div>
+    <div class="lib-card-list">
+      <button class="lib-card" onclick="openLibStr('kneerehab')">
+        <div class="lc-left">
+          <div class="lc-icon">🩹</div>
+          <div class="lc-body">
+            <div class="lc-name">Knee Rehab Circuit</div>
+            <div class="lc-meta">${window.MOE_DATA.KNEE_REHAB.length} exercises · daily prehab</div>
+          </div>
+        </div>
+        ${libCardChevron()}
+      </button>
+    </div>
+    <div style="height:32px"></div>`;
+}
+
+function openSavedEx(id) {
+  const ex = (state.savedEx || []).find(e => e.id === id);
+  if (!ex) return;
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">Saved exercise · <span style="color:var(--ember)">${ex.category}</span></div>
+    <h2>${ex.name}</h2>
+    <div class="wk-metrics" style="margin:14px 0">
+      <div class="metric"><div class="m-label">Default sets</div><div class="m-val">${ex.sets}</div></div>
+      <div class="metric"><div class="m-label">Target</div><div class="m-val">${ex.target}</div></div>
+    </div>
+    ${ex.note ? `<div class="coach-note"><strong>Note:</strong> ${ex.note}</div>` : ''}
+    <button class="btn btn-ghost" style="margin-top:20px;color:var(--ink-3)" onclick="deleteSavedEx('${ex.id}')">🗑 Remove from library</button>
+  `);
+}
+
 /* --------------- Expose for inline onclick --------------- */
 Object.assign(window, {
   openCheckin, openSwap, openLogSheet, openGoalSheet,
@@ -1574,6 +1784,7 @@ Object.assign(window, {
   openWeightSheet, delWeight,
   openLibrary, openLibRun, openLibStr, startLibRun, startLibStrSession,
   openCreateCustom, removeCustomEx, deleteCustomRun, deleteCustomStr,
+  saveExFromBlock, deleteSavedEx, openSavedEx, openExercisePicker,
   triggerWeatherDetect,
 });
 
