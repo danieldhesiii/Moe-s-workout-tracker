@@ -27,6 +27,7 @@ const defaultState = () => ({
   customRuns: [],    // [{id, label, style, target, intensity, pace, coach, custom:true}]
   customStr: [],     // [{id, label, block:[{name,sets,target,note}], custom:true}]
   savedEx: [],       // [{id, name, sets, target, note, category}]
+  manualPBs: {},     // {k5:{pace,date,note}, k10:{...}, half:{...}, marathon:{...}}
 });
 
 let state = load();
@@ -42,7 +43,8 @@ function ensureShape(s) {
   s.weeklyNotes = s.weeklyNotes || {};
   s.customRuns  = s.customRuns  || [];
   s.customStr   = s.customStr   || [];
-  s.savedEx     = s.savedEx     || [];   // individual saved exercises
+  s.savedEx     = s.savedEx     || [];
+  s.manualPBs   = s.manualPBs   || {};
   return s;
 }
 
@@ -151,13 +153,29 @@ function computePBs() {
     return (+m) * 60 + (+(s || 0));
   };
   const runs = state.sessions.filter(s => s.type === 'run' && s.distance);
-  const best = (min, max) => {
+  const bestFromSessions = (min, max) => {
     const m = runs.filter(r => r.distance >= min && r.distance <= max && r.pace);
     if (!m.length) return null;
     return m.reduce((a, b) => paceToSecs(a.pace) < paceToSecs(b.pace) ? a : b);
   };
+  const merge = (key, min, max) => {
+    const auto = bestFromSessions(min, max);
+    const manual = state.manualPBs?.[key];
+    if (!auto && !manual) return null;
+    if (!auto) return { ...manual, source: 'manual' };
+    if (!manual) return { ...auto, source: 'auto' };
+    return paceToSecs(auto.pace) <= paceToSecs(manual.pace)
+      ? { ...auto, source: 'auto' }
+      : { ...manual, source: 'manual' };
+  };
   const longest = runs.reduce((a, b) => (b.distance > (a?.distance || 0) ? b : a), null);
-  return { k5: best(4.8, 5.2), k10: best(9.8, 10.2), half: best(20.5, 21.5), marathon: best(41.5, 42.7), longest };
+  return {
+    k5: merge('k5', 4.8, 5.2),
+    k10: merge('k10', 9.8, 10.2),
+    half: merge('half', 20.5, 21.5),
+    marathon: merge('marathon', 41.5, 42.7),
+    longest,
+  };
 }
 
 function checkForPB(entry) {
@@ -1346,7 +1364,6 @@ function renderProgress() {
       <div class="stat"><div class="s-val">${wk.length}<span> / ${activeDaysThisWeek()}</span></div><div class="s-label">This week</div><div class="s-trend up">${wkKm.toFixed(1)} km done</div></div>
     </div>
 
-    <div class="section-title">Personal Bests</div>
     ${buildPBCard(pbs)}
 
     <div class="section-title">Training Load</div>
@@ -1373,17 +1390,109 @@ function renderProgress() {
 
 function buildPBCard(pbs) {
   const pbItems = [
-    { label: '5K', pb: pbs.k5 },
-    { label: '10K', pb: pbs.k10 },
-    { label: '½ Marathon', pb: pbs.half },
-    { label: 'Marathon', pb: pbs.marathon },
+    { key: 'k5', label: '5K', pb: pbs.k5 },
+    { key: 'k10', label: '10K', pb: pbs.k10 },
+    { key: 'half', label: '½ Marathon', pb: pbs.half },
+    { key: 'marathon', label: 'Marathon', pb: pbs.marathon },
   ];
+  const fmtDate = d => { try { return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }); } catch { return ''; } };
   const cells = pbItems.map(({ label, pb }) => pb
-    ? `<div class="pb-item"><div class="pb-label">${label}</div><div class="pb-pace">${pb.pace}<span>/km</span></div><div class="pb-date">${new Date(pb.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</div></div>`
-    : `<div class="pb-item pb-empty"><div class="pb-label">${label}</div><div class="pb-pace muted">—</div><div class="pb-date muted" style="font-size:10px">log a race-distance run</div></div>`
+    ? `<div class="pb-item" title="${pb.source === 'manual' ? 'Manually entered' : 'Auto-detected from session'}">
+         <div class="pb-label">${label}${pb.source === 'manual' ? ' <span style="font-size:9px;color:var(--ink-3);font-weight:400">✎</span>' : ''}</div>
+         <div class="pb-pace">${pb.pace}<span>/km</span></div>
+         <div class="pb-date">${fmtDate(pb.date)}${pb.note ? `<br><span style="font-size:9.5px;color:var(--ink-3)">${pb.note}</span>` : ''}</div>
+       </div>`
+    : `<div class="pb-item pb-empty">
+         <div class="pb-label">${label}</div>
+         <div class="pb-pace muted">—</div>
+         <div class="pb-date muted" style="font-size:10px">tap ✎ to enter</div>
+       </div>`
   ).join('');
-  const longest = pbs.longest ? `<div class="pb-item"><div class="pb-label">Longest</div><div class="pb-pace">${pbs.longest.distance}<span>km</span></div><div class="pb-date">${new Date(pbs.longest.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</div></div>` : '';
-  return `<div class="card"><div class="pb-grid">${cells}${longest}</div><p class="muted" style="font-size:11px;margin-top:12px">Auto-detected from logged runs within ±200m of each race distance.</p></div>`;
+  const longest = pbs.longest
+    ? `<div class="pb-item"><div class="pb-label">Longest</div><div class="pb-pace">${pbs.longest.distance}<span>km</span></div><div class="pb-date">${fmtDate(pbs.longest.date)}</div></div>`
+    : '';
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-size:12px;font-weight:600;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em">Personal Bests</span>
+        <button onclick="openEditPBs()" style="border:none;background:var(--bg-2);border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:600;color:var(--ember);cursor:pointer">✎ Edit / Add</button>
+      </div>
+      <div class="pb-grid">${cells}${longest}</div>
+      <p class="muted" style="font-size:11px;margin-top:12px">Auto-detected from logged runs. ✎ = manually entered.</p>
+    </div>`;
+}
+
+function openEditPBs() {
+  const PB_DEFS = [
+    { key: 'k5', label: '5K', hint: 'e.g. 24:30 or 5:00/km' },
+    { key: 'k10', label: '10K', hint: 'e.g. 51:00 or 5:06/km' },
+    { key: 'half', label: 'Half Marathon', hint: 'e.g. 1:52:00 or 5:20/km' },
+    { key: 'marathon', label: 'Marathon', hint: 'e.g. 3:55:00 or 5:34/km' },
+  ];
+  const m = state.manualPBs || {};
+  const pbs = computePBs();
+
+  const rows = PB_DEFS.map(({ key, label, hint }) => {
+    const manual = m[key];
+    const auto = pbs[key];
+    const autoLabel = auto && auto.source === 'auto'
+      ? `<span style="font-size:11.5px;color:var(--ink-3);display:block;margin-bottom:4px">Auto-detected: ${auto.pace}/km on ${new Date(auto.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'})}</span>`
+      : '';
+    return `
+      <div style="padding:14px 0;border-bottom:1px solid var(--line)">
+        <div style="font-weight:600;font-size:14px;margin-bottom:4px">${label}</div>
+        ${autoLabel}
+        <div class="field-row" style="margin-bottom:6px">
+          <div class="field">
+            <label>Pace (/km)</label>
+            <input class="pb-pace-inp mono" data-k="${key}" value="${escapeHtml(manual?.pace || '')}" placeholder="5:10" />
+          </div>
+          <div class="field">
+            <label>Date</label>
+            <input class="pb-date-inp" type="date" data-k="${key}" value="${manual?.date || ''}" />
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <input class="pb-note-inp" data-k="${key}" value="${escapeHtml(manual?.note || '')}" placeholder="Note — e.g. race name, conditions (optional)" />
+        </div>
+        ${manual ? `<button onclick="clearManualPB('${key}')" style="border:none;background:none;font-size:11.5px;color:var(--ink-3);cursor:pointer;padding:4px 0;margin-top:4px">✕ Clear manual entry</button>` : ''}
+      </div>`;
+  }).join('');
+
+  mountSheet(`
+    <h2>Edit Personal Bests</h2>
+    <p class="sub">Enter a PB manually — useful for races before you started logging, or sessions you forgot to record. Auto-detected entries from your logs take priority if they're faster.</p>
+    ${rows}
+    <button class="btn btn-ember" id="savePBsBtn" style="margin-top:20px">Save PBs</button>
+  `);
+
+  document.getElementById('savePBsBtn').addEventListener('click', () => {
+    const newManual = { ...m };
+    PB_DEFS.forEach(({ key }) => {
+      const pace = document.querySelector(`.pb-pace-inp[data-k="${key}"]`)?.value.trim();
+      const date = document.querySelector(`.pb-date-inp[data-k="${key}"]`)?.value;
+      const note = document.querySelector(`.pb-note-inp[data-k="${key}"]`)?.value.trim();
+      if (pace) {
+        newManual[key] = { pace, date: date || new Date().toISOString().slice(0, 10), note };
+      } else {
+        delete newManual[key];
+      }
+    });
+    state.manualPBs = newManual;
+    save();
+    closeSheet();
+    if (currentTab === 'progress') renderProgress();
+    toast('Personal bests saved');
+  });
+}
+
+function clearManualPB(key) {
+  state.manualPBs = { ...(state.manualPBs || {}) };
+  delete state.manualPBs[key];
+  save();
+  closeSheet();
+  openEditPBs();
+  if (currentTab === 'progress') renderProgress();
 }
 
 function buildTrainingLoad() {
@@ -1785,6 +1894,7 @@ Object.assign(window, {
   openLibrary, openLibRun, openLibStr, startLibRun, startLibStrSession,
   openCreateCustom, removeCustomEx, deleteCustomRun, deleteCustomStr,
   saveExFromBlock, deleteSavedEx, openSavedEx, openExercisePicker,
+  openEditPBs, clearManualPB,
   triggerWeatherDetect,
 });
 
