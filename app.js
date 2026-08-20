@@ -28,6 +28,8 @@ const defaultState = () => ({
   customStr: [],     // [{id, label, block:[{name,sets,target,note}], custom:true}]
   savedEx: [],       // [{id, name, sets, target, note, category}]
   manualPBs: {},     // {k5:{pace,date,note}, k10:{...}, half:{...}, marathon:{...}}
+  routes: [],        // [{id, name, distanceKm, note, tags:[]}]
+  cycle: {},         // {lastPeriod:'YYYY-MM-DD', cycleLength:28}
 });
 
 let state = load();
@@ -45,6 +47,8 @@ function ensureShape(s) {
   s.customStr   = s.customStr   || [];
   s.savedEx     = s.savedEx     || [];
   s.manualPBs   = s.manualPBs   || {};
+  s.routes      = s.routes      || [];
+  s.cycle       = s.cycle       || {};
   return s;
 }
 
@@ -387,10 +391,31 @@ function renderToday() {
   // Heal old check-in schema
   if (ci && !ci.result) { ci.result = computeReadiness(ci.answers || {}); state.checkins[todayKey()] = ci; save(); }
 
+  // Race countdown — nearest upcoming goal
+  const upcoming = state.goals.filter(g => new Date(g.date) > new Date()).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const nextRace = upcoming[0];
+  const countdownHtml = nextRace ? (() => {
+    const days = Math.max(0, Math.ceil((new Date(nextRace.date) - new Date()) / 864e5));
+    const urgency = days <= 14 ? 'var(--ember)' : days <= 42 ? '#d97706' : 'var(--ink)';
+    return `<div class="card" style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;padding:14px 18px">
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:2px">Next race</div>
+        <div style="font-weight:700;font-size:15px;color:var(--ink)">${nextRace.race}</div>
+        <div style="font-size:12px;color:var(--ink-3);margin-top:2px">${new Date(nextRace.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-family:var(--font-display);font-size:36px;font-weight:700;line-height:1;color:${urgency}">${days}</div>
+        <div style="font-size:11px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em">days</div>
+      </div>
+    </div>`;
+  })() : '';
+
   let html = `<div class="today-hero">
     <div class="eyebrow">Today · ${plan.focus}</div>
     <div class="h-big">${plan.title}</div>
   </div>
+
+  ${countdownHtml}
 
   <div class="card wk-mileage-card" style="margin-top:14px">
     <div class="wk-prog-top">
@@ -405,6 +430,8 @@ function renderToday() {
       <span>${Math.round(pct)}%</span>
     </div>
   </div>`;
+
+  html += buildLongRunCard();
 
   if (!ci) {
     html += `<div class="card readiness-card" style="margin-top:12px">
@@ -1366,6 +1393,15 @@ function renderProgress() {
 
     ${buildPBCard(pbs)}
 
+    ${buildLongRunCard()}
+
+    ${buildCycleCard()}
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" style="flex:1;font-size:13.5px" onclick="openPaceCalc()">⏱ Pace calculator</button>
+      <button class="btn btn-ghost" style="flex:1;font-size:13.5px" onclick="openRoutes()">🗺️ My routes</button>
+    </div>
+
     <div class="section-title">Training Load</div>
     ${buildTrainingLoad()}
 
@@ -1885,6 +1921,362 @@ function openSavedEx(id) {
   `);
 }
 
+/* --------------- Pace Calculator --------------- */
+function openPaceCalc() {
+  mountSheet(`
+    <h2>Pace Calculator</h2>
+    <p class="sub">Enter any two values and calculate the third.</p>
+
+    <div class="seg" id="pcMode" style="margin-bottom:20px">
+      <button data-m="pace" class="on">Pace → Time</button>
+      <button data-m="time">Time → Pace</button>
+      <button data-m="splits">Goal splits</button>
+    </div>
+
+    <div id="pcForm">${pcPaceForm()}</div>
+  `);
+  document.getElementById('pcMode').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.getElementById('pcMode').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    const m = b.dataset.m;
+    document.getElementById('pcForm').innerHTML =
+      m === 'pace' ? pcPaceForm() : m === 'time' ? pcTimeForm() : pcSplitsForm();
+    bindPcCalc(m);
+  });
+  bindPcCalc('pace');
+}
+
+function pcPaceForm() {
+  const DISTS = [{ l:'5K',v:5 },{ l:'10K',v:10 },{ l:'Half',v:21.0975 },{ l:'Marathon',v:42.195 }];
+  return `
+    <div class="field"><label>Distance</label>
+      <div class="seg" id="pcDist">${DISTS.map((d,i) => `<button data-v="${d.v}" class="${i===0?'on':''}">${d.l}</button>`).join('')}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <input id="pcDistCustom" class="mono" inputmode="decimal" placeholder="Custom km" style="flex:1" />
+        <span style="font-size:13px;color:var(--ink-3)">km</span>
+      </div>
+    </div>
+    <div class="field"><label>Pace (min/km)</label><input id="pcPace" class="mono" placeholder="5:30" /></div>
+    <button class="btn btn-ember" id="pcCalc">Calculate finish time</button>
+    <div id="pcResult" style="margin-top:16px"></div>`;
+}
+
+function pcTimeForm() {
+  const DISTS = [{ l:'5K',v:5 },{ l:'10K',v:10 },{ l:'Half',v:21.0975 },{ l:'Marathon',v:42.195 }];
+  return `
+    <div class="field"><label>Distance</label>
+      <div class="seg" id="pcDist">${DISTS.map((d,i) => `<button data-v="${d.v}" class="${i===0?'on':''}">${d.l}</button>`).join('')}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <input id="pcDistCustom" class="mono" inputmode="decimal" placeholder="Custom km" style="flex:1" />
+        <span style="font-size:13px;color:var(--ink-3)">km</span>
+      </div>
+    </div>
+    <div class="field"><label>Goal finish time (h:mm:ss or mm:ss)</label><input id="pcTime" class="mono" placeholder="3:55:00" /></div>
+    <button class="btn btn-ember" id="pcCalc">Calculate pace</button>
+    <div id="pcResult" style="margin-top:16px"></div>`;
+}
+
+function pcSplitsForm() {
+  const DISTS = [{ l:'5K',v:5 },{ l:'10K',v:10 },{ l:'Half',v:21.0975 },{ l:'Marathon',v:42.195 }];
+  return `
+    <div class="field"><label>Distance</label>
+      <div class="seg" id="pcDist">${DISTS.map((d,i) => `<button data-v="${d.v}" class="${i===0?'on':''}">${d.l}</button>`).join('')}</div>
+    </div>
+    <div class="field"><label>Goal pace (min/km)</label><input id="pcPace" class="mono" placeholder="5:30" /></div>
+    <button class="btn btn-ember" id="pcCalc">Show splits</button>
+    <div id="pcResult" style="margin-top:16px"></div>`;
+}
+
+function bindPcCalc(mode) {
+  document.getElementById('pcDist')?.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.getElementById('pcDist').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    if (document.getElementById('pcDistCustom')) document.getElementById('pcDistCustom').value = '';
+  });
+
+  document.getElementById('pcCalc')?.addEventListener('click', () => {
+    const activeDist = document.getElementById('pcDist')?.querySelector('.on');
+    const customKm = parseFloat(document.getElementById('pcDistCustom')?.value);
+    const km = customKm || parseFloat(activeDist?.dataset.v) || 0;
+    const res = document.getElementById('pcResult');
+    if (!km) { res.innerHTML = `<p class="muted">Pick a distance first.</p>`; return; }
+
+    const parsePace = s => {
+      if (!s) return null;
+      const p = s.trim().replace(',', ':');
+      const parts = p.split(':');
+      if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1] || 0);
+      return null;
+    };
+    const parseTime = s => {
+      if (!s) return null;
+      const p = s.trim().replace(',', ':').split(':').map(Number);
+      if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+      if (p.length === 2) return p[0] * 60 + p[1];
+      return null;
+    };
+    const fmtTime = secs => {
+      const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.round(secs % 60);
+      return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+    };
+    const fmtPace = secs => `${Math.floor(secs/60)}:${String(Math.round(secs%60)).padStart(2,'0')}`;
+
+    if (mode === 'pace') {
+      const pace = parsePace(document.getElementById('pcPace')?.value);
+      if (!pace) { res.innerHTML = `<p class="muted">Enter a pace like 5:30</p>`; return; }
+      const total = pace * km;
+      res.innerHTML = `<div class="card" style="text-align:center;padding:18px">
+        <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px">${km} km at ${fmtPace(pace)}/km</div>
+        <div style="font-family:var(--font-display);font-size:38px;font-weight:700;color:var(--ember)">${fmtTime(total)}</div>
+        <div style="font-size:13px;color:var(--ink-3);margin-top:4px">finish time</div>
+      </div>`;
+    } else if (mode === 'time') {
+      const total = parseTime(document.getElementById('pcTime')?.value);
+      if (!total) { res.innerHTML = `<p class="muted">Enter a time like 3:55:00</p>`; return; }
+      const pace = total / km;
+      res.innerHTML = `<div class="card" style="text-align:center;padding:18px">
+        <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px">${km} km in ${fmtTime(total)}</div>
+        <div style="font-family:var(--font-display);font-size:38px;font-weight:700;color:var(--ember)">${fmtPace(pace)}<span style="font-size:16px">/km</span></div>
+        <div style="font-size:13px;color:var(--ink-3);margin-top:4px">required pace</div>
+      </div>`;
+    } else {
+      const pace = parsePace(document.getElementById('pcPace')?.value);
+      if (!pace) { res.innerHTML = `<p class="muted">Enter a pace like 5:30</p>`; return; }
+      const splitEvery = km <= 10 ? 1 : km <= 21.2 ? 5 : 5;
+      const rows = [];
+      for (let d = splitEvery; d <= km; d += splitEvery) {
+        rows.push(`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+          <span style="font-weight:600">${d} km</span>
+          <span class="mono" style="color:var(--ember)">${fmtTime(pace * d)}</span>
+        </div>`);
+      }
+      if (km % splitEvery !== 0) {
+        rows.push(`<div style="display:flex;justify-content:space-between;padding:8px 0">
+          <span style="font-weight:600">${km} km (finish)</span>
+          <span class="mono" style="color:var(--ember)">${fmtTime(pace * km)}</span>
+        </div>`);
+      }
+      res.innerHTML = `<div class="card">${rows.join('')}</div>`;
+    }
+  });
+}
+
+/* --------------- Long run planner --------------- */
+function buildLongRunCard() {
+  const runs = state.sessions.filter(s => s.type === 'run' && s.distance);
+  if (runs.length < 2) return '';
+
+  // 4-week avg weekly mileage
+  const now = new Date();
+  const fourWeeksAgo = new Date(now); fourWeeksAgo.setDate(now.getDate() - 28);
+  const recentKm = runs.filter(r => new Date(r.date) >= fourWeeksAgo).reduce((a, r) => a + r.distance, 0);
+  const avgWeeklyKm = recentKm / 4;
+  if (avgWeeklyKm < 5) return '';
+
+  // Suggested long run = ~30% of weekly volume, min 8km, max 35km
+  const suggested = Math.min(35, Math.max(8, Math.round(avgWeeklyKm * 0.3 * 2) / 2));
+
+  // Days to next race
+  const nextRace = state.goals.filter(g => new Date(g.date) > now).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  const weeksOut = nextRace ? Math.floor((new Date(nextRace.date) - now) / (7 * 864e5)) : null;
+
+  // Taper: if ≤3 weeks out, scale back
+  const taperFactor = weeksOut !== null && weeksOut <= 3 ? (weeksOut <= 1 ? 0.5 : 0.7) : 1;
+  const finalSuggested = Math.round(suggested * taperFactor * 2) / 2;
+
+  const taperNote = weeksOut !== null && weeksOut <= 3
+    ? `<div style="font-size:12px;color:#d97706;margin-top:6px;font-weight:600">⚠️ ${weeksOut <= 1 ? 'Race week — easy only' : 'Taper phase — reduced distance'}</div>`
+    : '';
+
+  return `<div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="eyebrow" style="margin-bottom:4px">Suggested long run</div>
+        <div style="font-family:var(--font-display);font-size:32px;font-weight:700;color:var(--ember);line-height:1">${finalSuggested}<span style="font-size:16px;color:var(--ink-3)"> km</span></div>
+        ${taperNote}
+        <div style="font-size:12px;color:var(--ink-3);margin-top:6px">Based on ${avgWeeklyKm.toFixed(0)} km/wk avg · 10% rule</div>
+      </div>
+      <button onclick="openPaceCalc()" style="border:none;background:var(--bg-2);border-radius:20px;padding:7px 14px;font-size:12.5px;font-weight:600;color:var(--ember);cursor:pointer;white-space:nowrap">Pace calc</button>
+    </div>
+  </div>`;
+}
+
+/* --------------- Cycle tracking --------------- */
+const CYCLE_PHASES = [
+  { name: 'Menstrual', days: [1,5], col: '#e879a0', tip: 'Lower intensity — iron levels drop. Prioritise easy runs, mobility, and rest. Hydrate well.' },
+  { name: 'Follicular', days: [6,13], col: '#10b981', tip: 'Energy rising. Good week for intervals, tempo runs, and pushing intensity. Strength responds well.' },
+  { name: 'Ovulation', days: [14,16], col: '#f59e0b', tip: 'Peak power and coordination. Great for long runs, speed work, and PRs. Watch for ligament laxity.' },
+  { name: 'Luteal', days: [17,28], col: '#8b5cf6', tip: 'Fatigue and temperature rise. Zone 2 and steady runs. Carbs help — don\'t fight the hunger.' },
+];
+
+function getCyclePhase() {
+  const { lastPeriod, cycleLength = 28 } = state.cycle || {};
+  if (!lastPeriod) return null;
+  const daysSince = Math.floor((new Date() - new Date(lastPeriod)) / 864e5) % cycleLength + 1;
+  const phase = CYCLE_PHASES.find(p => daysSince >= p.days[0] && daysSince <= p.days[1]) || CYCLE_PHASES[3];
+  return { ...phase, dayOfCycle: daysSince, cycleLength };
+}
+
+function buildCycleCard() {
+  const phase = getCyclePhase();
+  if (!phase) return `<div class="card" style="margin-top:16px">
+    <div class="eyebrow" style="margin-bottom:6px">Cycle tracker</div>
+    <p class="muted" style="font-size:13px">Track your cycle to get phase-specific training tips.</p>
+    <button class="btn btn-ghost" style="margin-top:12px" onclick="openCycleSetup()">Set up cycle tracking</button>
+  </div>`;
+
+  const pct = Math.round((phase.dayOfCycle / phase.cycleLength) * 100);
+  return `<div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="eyebrow" style="margin:0">Cycle · day ${phase.dayOfCycle}</div>
+      <button onclick="openCycleSetup()" style="border:none;background:none;font-size:12px;color:var(--ink-3);cursor:pointer;padding:2px 4px">Edit</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:10px;height:10px;border-radius:50%;background:${phase.col};flex-shrink:0"></div>
+      <div style="font-weight:700;font-size:15px">${phase.name} phase</div>
+    </div>
+    <div class="g-bar-track" style="margin:10px 0 6px">
+      <div style="height:100%;width:${pct}%;background:${phase.col};border-radius:4px;transition:width .6s"></div>
+    </div>
+    <p style="font-size:13px;color:var(--ink-2);line-height:1.5;margin:0">${phase.tip}</p>
+  </div>`;
+}
+
+function openCycleSetup() {
+  const { lastPeriod = '', cycleLength = 28 } = state.cycle || {};
+  mountSheet(`
+    <h2>Cycle tracking</h2>
+    <p class="sub">Your data stays on-device. Used only to give you phase-specific training guidance.</p>
+    <div class="field"><label>First day of last period</label><input id="cyDate" type="date" value="${lastPeriod}" /></div>
+    <div class="field"><label>Average cycle length (days)</label><input id="cyLen" class="mono" inputmode="numeric" value="${cycleLength}" placeholder="28" /></div>
+    <div style="margin:16px 0;padding:14px;background:var(--bg-2);border-radius:12px">
+      <div class="eyebrow" style="margin-bottom:10px">Phase guide</div>
+      ${CYCLE_PHASES.map(p => `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${p.col};flex-shrink:0;margin-top:4px"></div>
+        <div><div style="font-weight:600;font-size:13px">Day ${p.days[0]}–${p.days[1]}: ${p.name}</div><div style="font-size:12px;color:var(--ink-3);line-height:1.4;margin-top:2px">${p.tip}</div></div>
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-ember" id="cySave">Save</button>
+    ${lastPeriod ? `<button class="btn btn-ghost" style="margin-top:10px;color:var(--ink-3)" onclick="clearCycle()">Clear cycle data</button>` : ''}
+  `);
+  document.getElementById('cySave').addEventListener('click', () => {
+    const d = document.getElementById('cyDate').value;
+    const l = parseInt(document.getElementById('cyLen').value) || 28;
+    if (!d) { toast('Enter the first day of your last period'); return; }
+    state.cycle = { lastPeriod: d, cycleLength: Math.max(21, Math.min(45, l)) };
+    save(); closeSheet();
+    if (currentTab === 'progress') renderProgress();
+    toast('Cycle tracking updated');
+  });
+}
+
+function clearCycle() {
+  state.cycle = {};
+  save(); closeSheet();
+  if (currentTab === 'progress') renderProgress();
+  toast('Cycle data cleared');
+}
+
+/* --------------- Route notes --------------- */
+function openRoutes() {
+  const routes = state.routes || [];
+  const rows = routes.length ? routes.map(r => `
+    <button class="lib-card" onclick="openRoute('${r.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">🗺️</div>
+        <div class="lc-body">
+          <div class="lc-name">${r.name}</div>
+          <div class="lc-meta">${r.distanceKm} km${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`).join('') : `<p class="muted" style="font-size:13px;text-align:center;padding:16px 0">No saved routes yet.</p>`;
+
+  mountSheet(`
+    <h2>Saved routes</h2>
+    <p class="sub">Your favourite loops and out-and-backs. Pick one when logging a run to keep notes consistent.</p>
+    <div class="lib-card-list" style="margin-bottom:16px">${rows}</div>
+    <button class="btn btn-ember" onclick="openAddRoute()">＋ Add a route</button>
+  `);
+}
+
+function openRoute(id) {
+  const r = (state.routes || []).find(x => x.id === id);
+  if (!r) return;
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">Saved route</div>
+    <h2>${r.name}</h2>
+    <div class="wk-metrics" style="margin:14px 0">
+      <div class="metric"><div class="m-label">Distance</div><div class="m-val">${r.distanceKm}<span> km</span></div></div>
+      ${r.elevationM ? `<div class="metric"><div class="m-label">Elevation</div><div class="m-val">${r.elevationM}<span> m</span></div></div>` : ''}
+      ${r.surface ? `<div class="metric"><div class="m-label">Surface</div><div class="m-val" style="font-size:13px">${r.surface}</div></div>` : ''}
+    </div>
+    ${r.note ? `<div class="coach-note"><strong>Notes:</strong> ${r.note}</div>` : ''}
+    ${r.tags?.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">${r.tags.map(t => `<span style="background:var(--bg-2);border-radius:20px;padding:4px 10px;font-size:12px;font-weight:600">${t}</span>`).join('')}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:20px">
+      <button class="btn btn-ember" style="flex:1" onclick="closeSheet();openLogSheet('${r.name.replace(/'/g,'').trim()}')">Log a run on this route</button>
+    </div>
+    <button class="btn btn-ghost" style="margin-top:10px;color:var(--ink-3)" onclick="deleteRoute('${r.id}')">🗑 Delete route</button>
+  `);
+}
+
+const ROUTE_TAGS = ['flat', 'hilly', 'trail', 'road', 'track', 'loop', 'out & back', 'parkrun'];
+function openAddRoute(prefillKm) {
+  mountSheet(`
+    <h2>Add a route</h2>
+    <div class="field"><label>Route name</label><input id="rt_name" placeholder="e.g. River loop, Park 10K" /></div>
+    <div class="field-row">
+      <div class="field"><label>Distance (km)</label><input id="rt_km" class="mono" inputmode="decimal" placeholder="10" value="${prefillKm || ''}" /></div>
+      <div class="field"><label>Elevation (m) — optional</label><input id="rt_elev" class="mono" inputmode="numeric" placeholder="120" /></div>
+    </div>
+    <div class="field"><label>Surface</label>
+      <div class="seg" id="rt_surf">
+        <button data-s="road" class="on">Road</button>
+        <button data-s="trail">Trail</button>
+        <button data-s="track">Track</button>
+        <button data-s="mixed">Mixed</button>
+      </div>
+    </div>
+    <div class="field"><label>Tags</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="rt_tags">
+        ${ROUTE_TAGS.map(t => `<button class="chip" data-t="${t}" style="padding:6px 12px;border-radius:20px;border:1.5px solid var(--line);background:transparent;font-size:12.5px;cursor:pointer;font-weight:500">${t}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field"><label>Notes — optional</label><textarea id="rt_note" placeholder="Landmarks, parking, water fountains, hazards…" style="min-height:70px"></textarea></div>
+    <button class="btn btn-ember" id="rtSave">Save route</button>
+  `);
+
+  // tag toggle
+  document.getElementById('rt_tags').addEventListener('click', e => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    b.classList.toggle('on');
+    b.style.background = b.classList.contains('on') ? 'var(--ember)' : 'transparent';
+    b.style.color = b.classList.contains('on') ? '#fff' : '';
+    b.style.borderColor = b.classList.contains('on') ? 'var(--ember)' : 'var(--line)';
+  });
+
+  document.getElementById('rtSave').addEventListener('click', () => {
+    const name = document.getElementById('rt_name').value.trim();
+    const km = parseFloat(document.getElementById('rt_km').value);
+    if (!name) { toast('Give the route a name'); return; }
+    if (!km) { toast('Enter the distance'); return; }
+    const surf = document.getElementById('rt_surf')?.querySelector('.on')?.dataset.s || 'road';
+    const tags = [...document.querySelectorAll('#rt_tags .chip.on')].map(b => b.dataset.t);
+    const elev = parseInt(document.getElementById('rt_elev').value) || null;
+    const note = document.getElementById('rt_note').value.trim();
+    state.routes = state.routes || [];
+    state.routes.push({ id: 'rt_' + uid(), name, distanceKm: km, surface: surf, elevationM: elev, tags, note });
+    save(); closeSheet(); toast(`"${name}" saved`);
+  });
+}
+
+function deleteRoute(id) {
+  state.routes = (state.routes || []).filter(r => r.id !== id);
+  save(); closeSheet(); openRoutes();
+}
+
 /* --------------- Expose for inline onclick --------------- */
 Object.assign(window, {
   openCheckin, openSwap, openLogSheet, openGoalSheet,
@@ -1895,6 +2287,8 @@ Object.assign(window, {
   openCreateCustom, removeCustomEx, deleteCustomRun, deleteCustomStr,
   saveExFromBlock, deleteSavedEx, openSavedEx, openExercisePicker,
   openEditPBs, clearManualPB,
+  openPaceCalc, openCycleSetup, clearCycle,
+  openRoutes, openRoute, openAddRoute, deleteRoute,
   triggerWeatherDetect,
 });
 

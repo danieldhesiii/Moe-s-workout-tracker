@@ -529,3 +529,9 @@ body {
   border-radius: 4px; color: #fff; margin-left: 3px; vertical-align: middle;
   font-family: var(--font-mono);
 }
+
+/* ---------- Pace calculator result ---------- */
+#pcResult .card { padding: 18px; text-align: center; }
+
+/* ---------- Route tag chips ---------- */
+#rt_tags .chip.on { background: var(--ember) !important; color: #fff !important; border-color: var(--ember) !important; }
