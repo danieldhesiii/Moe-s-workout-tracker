@@ -447,6 +447,8 @@ function renderToday() {
     html += renderWorkoutCard(r.plan, ci.swap || r.rec.swap);
   }
 
+  html += buildCycleChip();
+
   view.innerHTML = html;
 }
 
@@ -2105,60 +2107,173 @@ function buildLongRunCard() {
 
 /* --------------- Cycle tracking --------------- */
 const CYCLE_PHASES = [
-  { name: 'Menstrual', days: [1,5], col: '#e879a0', tip: 'Lower intensity — iron levels drop. Prioritise easy runs, mobility, and rest. Hydrate well.' },
-  { name: 'Follicular', days: [6,13], col: '#10b981', tip: 'Energy rising. Good week for intervals, tempo runs, and pushing intensity. Strength responds well.' },
-  { name: 'Ovulation', days: [14,16], col: '#f59e0b', tip: 'Peak power and coordination. Great for long runs, speed work, and PRs. Watch for ligament laxity.' },
-  { name: 'Luteal', days: [17,28], col: '#8b5cf6', tip: 'Fatigue and temperature rise. Zone 2 and steady runs. Carbs help — don\'t fight the hunger.' },
+  {
+    name: 'Menstrual', emoji: '🌑', days: [1, 5], col: '#e879a0',
+    what: 'Your period. Oestrogen and progesterone are at their lowest. Energy dips, especially days 1–2. Iron drops if bleeding is heavy.',
+    training: 'Keep it easy — gentle runs, yoga, or a rest day. Don\'t fight your body today. If you feel good, light movement is fine; if you don\'t, rest is the session.',
+    recovery: 'Prioritise sleep. Warmth helps with cramps. Iron-rich foods (spinach, lentils, red meat) replace what\'s lost.',
+    nutrition: 'Anti-inflammatory foods help — berries, leafy greens, omega-3s. Stay hydrated. Cravings for warmth and comfort food are real and valid.',
+    intensity: 'low',
+  },
+  {
+    name: 'Follicular', emoji: '🌒', days: [6, 13], col: '#10b981',
+    what: 'Oestrogen rises as your body prepares to ovulate. Energy climbs — this is when most women feel sharpest and strongest.',
+    training: 'Best phase for hard sessions. Intervals, tempo runs, new strength PRs. Your body adapts to training faster here — load responds well.',
+    recovery: 'Normal recovery. Body handles volume and intensity well. Good time to add a long run or increase weekly mileage slightly.',
+    nutrition: 'Carbs fuel the hard efforts well. Lighter meals are easier to digest. Coffee timing matters less — you\'re naturally more alert.',
+    intensity: 'high',
+  },
+  {
+    name: 'Ovulation', emoji: '🌕', days: [14, 16], col: '#f59e0b',
+    what: 'Oestrogen peaks and LH triggers egg release. Peak strength, coordination, and mood for most women. The body\'s performance window.',
+    training: 'Go for it — long runs, race simulations, pace work. Best window to attempt a PB. Warm up thoroughly: oestrogen peaks loosen ligaments slightly, raising injury risk if you skip prep.',
+    recovery: 'Body is resilient but don\'t skip the warm-up. Core stability work pays off here.',
+    nutrition: 'Hydration is critical — body temperature runs slightly higher. Electrolytes matter on longer efforts. Light, clean meals sit well.',
+    intensity: 'peak',
+  },
+  {
+    name: 'Luteal', emoji: '🌗', days: [17, 28], col: '#8b5cf6',
+    what: 'Progesterone rises then falls. Body temperature goes up ~0.5°C, which makes effort feel harder at the same pace. Late luteal (day 22+) often brings PMS symptoms — fatigue, mood shifts, bloating.',
+    training: 'Shift to Zone 2, steady-state, and strength. RPE will feel higher than usual — that\'s the hormone, not fitness loss. In late luteal, back off intensity and listen to your body.',
+    recovery: 'You need more sleep in this phase — honour it. Magnesium (in nuts, dark chocolate, leafy greens) helps with cramps, sleep, and mood.',
+    nutrition: 'Increased appetite is real and hormonal — not a willpower issue. Carb up before long runs. Salty cravings mean your body wants electrolytes. Don\'t restrict.',
+    intensity: 'moderate',
+  },
 ];
+
+const INTENSITY_LABELS = { low: { label: 'Easy days', col: '#e879a0' }, moderate: { label: 'Moderate', col: '#8b5cf6' }, high: { label: 'Push it', col: '#10b981' }, peak: { label: 'Peak window', col: '#f59e0b' } };
 
 function getCyclePhase() {
   const { lastPeriod, cycleLength = 28 } = state.cycle || {};
   if (!lastPeriod) return null;
   const daysSince = Math.floor((new Date() - new Date(lastPeriod)) / 864e5) % cycleLength + 1;
   const phase = CYCLE_PHASES.find(p => daysSince >= p.days[0] && daysSince <= p.days[1]) || CYCLE_PHASES[3];
-  return { ...phase, dayOfCycle: daysSince, cycleLength };
+  const daysLeft = phase.days[1] - daysSince + 1;
+  const nextPhase = CYCLE_PHASES[(CYCLE_PHASES.indexOf(phase) + 1) % CYCLE_PHASES.length];
+  return { ...phase, dayOfCycle: daysSince, cycleLength, daysLeft, nextPhase };
 }
 
 function buildCycleCard() {
   const phase = getCyclePhase();
-  if (!phase) return `<div class="card" style="margin-top:16px">
-    <div class="eyebrow" style="margin-bottom:6px">Cycle tracker</div>
-    <p class="muted" style="font-size:13px">Track your cycle to get phase-specific training tips.</p>
-    <button class="btn btn-ghost" style="margin-top:12px" onclick="openCycleSetup()">Set up cycle tracking</button>
-  </div>`;
+  if (!phase) return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="eyebrow" style="margin:0">Cycle training guide</div>
+      </div>
+      <p style="font-size:13.5px;color:var(--ink-2);line-height:1.5;margin:0 0 14px">Get phase-specific training tips based on where you are in your cycle. Everything stays private on your device.</p>
+      <button class="btn btn-ember" onclick="openCycleSetup()">Set up cycle tracking</button>
+    </div>`;
 
   const pct = Math.round((phase.dayOfCycle / phase.cycleLength) * 100);
-  return `<div class="card" style="margin-top:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="eyebrow" style="margin:0">Cycle · day ${phase.dayOfCycle}</div>
-      <button onclick="openCycleSetup()" style="border:none;background:none;font-size:12px;color:var(--ink-3);cursor:pointer;padding:2px 4px">Edit</button>
-    </div>
-    <div style="display:flex;align-items:center;gap:12px">
-      <div style="width:10px;height:10px;border-radius:50%;background:${phase.col};flex-shrink:0"></div>
-      <div style="font-weight:700;font-size:15px">${phase.name} phase</div>
-    </div>
-    <div class="g-bar-track" style="margin:10px 0 6px">
-      <div style="height:100%;width:${pct}%;background:${phase.col};border-radius:4px;transition:width .6s"></div>
-    </div>
-    <p style="font-size:13px;color:var(--ink-2);line-height:1.5;margin:0">${phase.tip}</p>
-  </div>`;
+  const il = INTENSITY_LABELS[phase.intensity];
+
+  // mini cycle timeline — 4 segments
+  const segWidth = (p) => Math.round(((p.days[1] - p.days[0] + 1) / phase.cycleLength) * 100);
+  const timeline = CYCLE_PHASES.map(p => {
+    const w = segWidth(p);
+    const isActive = p.name === phase.name;
+    return `<div style="flex:${w};height:6px;background:${p.col};opacity:${isActive ? 1 : 0.25};border-radius:3px;transition:opacity .3s"></div>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="eyebrow" style="margin:0">Cycle · day ${phase.dayOfCycle} of ${phase.cycleLength}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button onclick="logPeriodStart()" style="border:none;background:var(--bg-2);border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:600;color:var(--ink-3);cursor:pointer">Period started</button>
+          <button onclick="openCycleSetup()" style="border:none;background:none;font-size:12px;color:var(--ink-3);cursor:pointer;padding:2px 4px">Edit</button>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:22px">${phase.emoji}</span>
+        <div>
+          <div style="font-weight:700;font-size:16px;color:${phase.col}">${phase.name} phase</div>
+          <div style="font-size:12px;color:var(--ink-3)">${phase.daysLeft} day${phase.daysLeft === 1 ? '' : 's'} left · then ${phase.nextPhase.name}</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${il.col}">${il.label}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:3px;margin-bottom:14px">${timeline}</div>
+
+      <p style="font-size:13.5px;color:var(--ink-2);line-height:1.5;margin:0 0 12px">${phase.what}</p>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="background:var(--bg-2);border-radius:10px;padding:10px 12px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${phase.col};margin-bottom:4px">Training</div>
+          <div style="font-size:13px;color:var(--ink-2);line-height:1.45">${phase.training}</div>
+        </div>
+        <div style="background:var(--bg-2);border-radius:10px;padding:10px 12px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-bottom:4px">Nutrition & recovery</div>
+          <div style="font-size:13px;color:var(--ink-2);line-height:1.45">${phase.nutrition}</div>
+        </div>
+      </div>
+
+      <button onclick="openCycleDetail()" style="border:none;background:none;font-size:12.5px;font-weight:600;color:var(--ember);cursor:pointer;padding:10px 0 2px;width:100%;text-align:left">Full cycle guide →</button>
+    </div>`;
+}
+
+function buildCycleChip() {
+  const phase = getCyclePhase();
+  if (!phase) return '';
+  return `<button onclick="openCycleDetail()" style="display:inline-flex;align-items:center;gap:6px;border:none;background:${phase.col}18;border-radius:20px;padding:5px 12px;font-size:12.5px;font-weight:600;color:${phase.col};cursor:pointer;margin-top:10px">
+    ${phase.emoji} ${phase.name} · day ${phase.dayOfCycle} <span style="opacity:.6;font-weight:400">→</span>
+  </button>`;
+}
+
+function logPeriodStart() {
+  state.cycle = { ...(state.cycle || {}), lastPeriod: todayKey() };
+  save();
+  if (currentTab === 'progress') renderProgress();
+  else if (currentTab === 'today') renderToday();
+  toast('Period logged — cycle reset to day 1');
+}
+
+function openCycleDetail() {
+  const phase = getCyclePhase();
+  const phaseCards = CYCLE_PHASES.map(p => {
+    const isActive = phase && p.name === phase?.name;
+    return `<div style="border:2px solid ${isActive ? p.col : 'var(--line)'};border-radius:14px;padding:14px;margin-bottom:12px;${isActive ? `background:${p.col}10` : ''}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:18px">${p.emoji}</span>
+        <div>
+          <div style="font-weight:700;font-size:14.5px;color:${p.col}">${p.name}${isActive ? ' <span style="font-size:11px;background:'+p.col+';color:#fff;border-radius:20px;padding:2px 8px;vertical-align:middle">now</span>' : ''}</div>
+          <div style="font-size:12px;color:var(--ink-3)">Day ${p.days[0]}–${p.days[1]}</div>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--ink-2);line-height:1.5;margin:0 0 8px">${p.what}</p>
+      <div style="font-size:12px;font-weight:600;color:${p.col};margin-bottom:2px">Training</div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin:0 0 8px">${p.training}</p>
+      <div style="font-size:12px;font-weight:600;color:var(--ink-3);margin-bottom:2px">Nutrition & recovery</div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.45;margin:0">${p.nutrition}</p>
+    </div>`;
+  }).join('');
+
+  mountSheet(`
+    <h2>Cycle training guide</h2>
+    <p class="sub">Your hormones affect how your body responds to training. Use this to train smarter, not just harder.</p>
+    ${phase ? `<div style="margin-bottom:16px;padding:12px 14px;background:${phase.col}15;border-radius:12px;border-left:3px solid ${phase.col}">
+      <div style="font-weight:700;font-size:13px;color:${phase.col}">${phase.emoji} You are currently in the ${phase.name} phase (day ${phase.dayOfCycle})</div>
+      <div style="font-size:12.5px;color:var(--ink-2);margin-top:4px;line-height:1.4">${phase.daysLeft} day${phase.daysLeft === 1 ? '' : 's'} left in this phase, then ${phase.nextPhase.name}.</div>
+    </div>` : ''}
+    ${phaseCards}
+    <button class="btn btn-ghost" style="margin-top:4px" onclick="closeSheet();openCycleSetup()">Edit cycle settings</button>
+  `);
 }
 
 function openCycleSetup() {
   const { lastPeriod = '', cycleLength = 28 } = state.cycle || {};
   mountSheet(`
-    <h2>Cycle tracking</h2>
-    <p class="sub">Your data stays on-device. Used only to give you phase-specific training guidance.</p>
+    <h2>Cycle settings</h2>
+    <p class="sub">Enter your last period start date and average cycle length. Everything is stored only on your device — never sent anywhere.</p>
     <div class="field"><label>First day of last period</label><input id="cyDate" type="date" value="${lastPeriod}" /></div>
-    <div class="field"><label>Average cycle length (days)</label><input id="cyLen" class="mono" inputmode="numeric" value="${cycleLength}" placeholder="28" /></div>
-    <div style="margin:16px 0;padding:14px;background:var(--bg-2);border-radius:12px">
-      <div class="eyebrow" style="margin-bottom:10px">Phase guide</div>
-      ${CYCLE_PHASES.map(p => `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
-        <div style="width:8px;height:8px;border-radius:50%;background:${p.col};flex-shrink:0;margin-top:4px"></div>
-        <div><div style="font-weight:600;font-size:13px">Day ${p.days[0]}–${p.days[1]}: ${p.name}</div><div style="font-size:12px;color:var(--ink-3);line-height:1.4;margin-top:2px">${p.tip}</div></div>
-      </div>`).join('')}
+    <div class="field"><label>Average cycle length (days)</label>
+      <input id="cyLen" class="mono" inputmode="numeric" value="${cycleLength}" placeholder="28" />
+      <div style="font-size:12px;color:var(--ink-3);margin-top:4px">Most cycles are 21–35 days. 28 is a common average.</div>
     </div>
-    <button class="btn btn-ember" id="cySave">Save</button>
+    <button class="btn btn-ember" id="cySave" style="margin-top:8px">Save</button>
     ${lastPeriod ? `<button class="btn btn-ghost" style="margin-top:10px;color:var(--ink-3)" onclick="clearCycle()">Clear cycle data</button>` : ''}
   `);
   document.getElementById('cySave').addEventListener('click', () => {
@@ -2168,7 +2283,8 @@ function openCycleSetup() {
     state.cycle = { lastPeriod: d, cycleLength: Math.max(21, Math.min(45, l)) };
     save(); closeSheet();
     if (currentTab === 'progress') renderProgress();
-    toast('Cycle tracking updated');
+    else if (currentTab === 'today') renderToday();
+    toast('Cycle tracking saved');
   });
 }
 
@@ -2287,7 +2403,7 @@ Object.assign(window, {
   openCreateCustom, removeCustomEx, deleteCustomRun, deleteCustomStr,
   saveExFromBlock, deleteSavedEx, openSavedEx, openExercisePicker,
   openEditPBs, clearManualPB,
-  openPaceCalc, openCycleSetup, clearCycle,
+  openPaceCalc, openCycleSetup, clearCycle, logPeriodStart, openCycleDetail,
   openRoutes, openRoute, openAddRoute, deleteRoute,
   triggerWeatherDetect,
 });
