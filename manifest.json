@@ -1,0 +1,13 @@
+{
+  "name": "Moe's Training Log",
+  "short_name": "Moe's Log",
+  "description": "Marathon training tracker for Moe — daily check-ins, session logging, and progress.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffd8e6",
+  "theme_color": "#ffd8e6",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -4,11 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#ffd8e6" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Moe's Log" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <title>Moe — Training Log</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -22,10 +28,13 @@
             <span class="brand-date" id="headerDate">—</span>
           </div>
         </div>
-        <button class="streak-chip" id="streakChip" title="Sessions logged this week">
-          <span class="streak-num" id="streakNum">0</span>
-          <span class="streak-label">this wk</span>
-        </button>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="syncDot" class="sync-dot ok" title="Synced to cloud"></span>
+          <button class="streak-chip" id="streakChip" title="Sessions done vs planned this week">
+            <span class="streak-num" id="streakNum">0/5</span>
+            <span class="streak-label">this wk</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -61,7 +70,6 @@
   <div id="sheet-root"></div>
 
   <script>
-    // Surface any script error visibly instead of a blank screen (diagnostic).
     window.addEventListener("error", function (e) {
       var v = document.getElementById("view");
       var msg = (e && e.message) ? e.message : String(e);
@@ -72,8 +80,8 @@
     });
   </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=9"></script>
-  <script src="data.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="config.js?v=10"></script>
+  <script src="data.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
