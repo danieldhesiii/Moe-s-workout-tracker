@@ -24,6 +24,8 @@ const defaultState = () => ({
   settings: { weeklyTarget: 75 },
   weights: [],
   weeklyNotes: {},
+  customRuns: [],    // [{id, label, style, target, intensity, pace, coach, custom:true}]
+  customStr: [],     // [{id, label, block:[{name,sets,target,note}], custom:true}]
 });
 
 let state = load();
@@ -37,6 +39,8 @@ function ensureShape(s) {
   s.settings    = s.settings    || { weeklyTarget: 75 };
   s.weights     = s.weights     || [];
   s.weeklyNotes = s.weeklyNotes || {};
+  s.customRuns  = s.customRuns  || [];
+  s.customStr   = s.customStr   || [];
   return s;
 }
 
@@ -242,14 +246,14 @@ function getDay(dow) {
 function materializeDay(dow, c) {
   const day = WEEK_TEMPLATE[dow].day;
   if (c.rest) return { day, type: 'rest', title: 'Rest Day', focus: 'Recovery', run: null, strength: null, coach: 'Full rest — recovery is where the adaptation happens.' };
-  const strLib = c.strengthId ? LIB_STRENGTH.find(s => s.id === c.strengthId) : null;
+  const strLib = c.strengthId ? allStrBlocks().find(s => s.id === c.strengthId) : null;
   const strength = strLib ? { label: strLib.label, block: strLib.block } : null;
   if (c.cross) {
     return { day, type: 'cross', title: 'Cross-Training' + (strength ? ' + ' + strength.label : ''), focus: 'Low-impact cross-training',
       run: { style: 'time', label: 'Bike / swim / row', target: '45 min', intensity: 'Zone 2 · low-impact' }, strength,
       coach: 'Aerobic work with zero pounding on the knees.' };
   }
-  const run = c.runId ? LIB_RUNS.find(r => r.id === c.runId) : null;
+  const run = c.runId ? allRuns().find(r => r.id === c.runId) : null;
   let type, title;
   if (run && strength) { type = 'run+strength'; title = `${run.label} + ${strength.label}`; }
   else if (run) { type = 'run'; title = run.label; }
@@ -512,8 +516,8 @@ function renderDayEditor(dow) {
   const def = WEEK_TEMPLATE[dow];
   const d = planDraft;
   const hasOverride = state.plan && state.plan[dow];
-  const runOpts = [{ id: null, label: 'No run', note: '' }, ...LIB_RUNS];
-  const strOpts = [{ id: null, label: 'No strength', note: '' }, ...LIB_STRENGTH];
+  const runOpts = [{ id: null, label: 'No run', note: '' }, ...allRuns()];
+  const strOpts = [{ id: null, label: 'No strength', note: '' }, ...allStrBlocks()];
   const pick = (arr, sel, kind) => arr.map(o => `
     <button class="lib-row ${sel === o.id ? 'on' : ''}" onclick="pickLib('${kind}', ${o.id === null ? 'null' : `'${o.id}'`}, ${dow})">
       <span class="lib-name">${o.label}</span>
@@ -722,6 +726,31 @@ function openSwap() {
   }));
 }
 
+/* --------------- Weather detect (triggered by button) --------------- */
+function triggerWeatherDetect() {
+  const btn = document.getElementById('weatherDetectBtn');
+  const status = document.getElementById('weatherStatus');
+  const row = document.getElementById('weatherRow');
+  if (!btn || !row) return;
+  btn.textContent = 'Detecting…';
+  btn.style.opacity = '0.5';
+  if (status) { status.textContent = ''; status.style.display = 'none'; }
+  autoDetectWeather().then(w => {
+    btn.textContent = '📍 Auto-detect';
+    btn.style.opacity = '1';
+    if (!w) {
+      if (status) { status.textContent = 'Location unavailable — tap a chip to pick manually.'; status.style.display = 'block'; }
+      return;
+    }
+    const match = WEATHER_OPTS.find(o => o === w);
+    if (match) {
+      logDraft.weather = match;
+      row.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.w === match));
+      if (status) { status.textContent = `Detected: ${match}`; status.style.display = 'block'; }
+    }
+  });
+}
+
 /* --------------- Log sheet (with auto-weather) --------------- */
 let logDraft = {};
 function openLogSheet(presetTitle, prefill, opts) {
@@ -758,7 +787,11 @@ function openLogSheet(presetTitle, prefill, opts) {
       <div class="mood-row" id="moodRow">${MOOD_OPTS.map((m, i) => `<button class="chip" data-mood="${i+1}">${m}</button>`).join('')}</div>
     </div>
     <div class="field">
-      <label>Weather <span id="weatherAutoLabel" style="font-size:11px;color:var(--ink-3);font-weight:400"></span></label>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+        <label style="margin:0">Weather</label>
+        <button id="weatherDetectBtn" onclick="triggerWeatherDetect()" style="border:none;background:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink-2);padding:2px 0">📍 Auto-detect</button>
+      </div>
+      <div id="weatherStatus" style="font-size:11.5px;color:var(--ink-3);margin-bottom:8px;display:none"></div>
       <div class="chip-row" id="weatherRow">${WEATHER_OPTS.map(w => `<button class="chip" data-w="${w}">${w}</button>`).join('')}</div>
     </div>
     <button class="btn btn-ember" id="logSubmit" style="margin-top:6px">Save session</button>
@@ -768,20 +801,6 @@ function openLogSheet(presetTitle, prefill, opts) {
   bindScale('rpeScale', v => logDraft.rpe = v);
   bindChips('moodRow', 'mood', v => logDraft.mood = +v, true);
   bindChips('weatherRow', 'w', v => logDraft.weather = v, true);
-
-  // Auto-detect weather silently in background
-  autoDetectWeather().then(w => {
-    if (!w) return;
-    const row = document.getElementById('weatherRow');
-    const lbl = document.getElementById('weatherAutoLabel');
-    if (!row) return;
-    const match = WEATHER_OPTS.find(o => o === w);
-    if (match && !logDraft.weather) {
-      logDraft.weather = match;
-      row.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.w === match));
-      if (lbl) lbl.textContent = '· auto-detected';
-    }
-  });
 
   document.getElementById('logSubmit').addEventListener('click', () => {
     const g = id => document.getElementById(id).value.trim();
@@ -806,6 +825,276 @@ function openLogSheet(presetTitle, prefill, opts) {
     if (opts.onSaved) { opts.onSaved(entry); }
     else { currentTab = 'progress'; render(); toast('Session logged 💪'); }
   });
+}
+
+/* --------------- Exercise Library --------------- */
+function libCardChevron() {
+  return `<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:var(--ink-3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none"><path d="M9 6l6 6-6 6"/></svg>`;
+}
+
+function openLibrary() {
+  const makeRunRow = r => `
+    <button class="lib-card" onclick="openLibRun('${r.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">🏃‍♀️</div>
+        <div class="lc-body">
+          <div class="lc-name">${r.label}${r.custom ? ' <span class="custom-badge">custom</span>' : ''}</div>
+          <div class="lc-meta"><span class="mono" style="color:var(--ember)">${r.target}</span> · ${r.intensity}</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`;
+
+  const makeStrRow = s => `
+    <button class="lib-card" onclick="openLibStr('${s.id}')">
+      <div class="lc-left">
+        <div class="lc-icon">🏋️</div>
+        <div class="lc-body">
+          <div class="lc-name">${s.label}${s.custom ? ' <span class="custom-badge">custom</span>' : ''}</div>
+          <div class="lc-meta">${s.block.length} exercises</div>
+        </div>
+      </div>
+      ${libCardChevron()}
+    </button>`;
+
+  const customRunSection = (state.customRuns?.length)
+    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your custom runs</div>
+       <div class="lib-card-list">${state.customRuns.map(makeRunRow).join('')}</div>` : '';
+
+  const customStrSection = (state.customStr?.length)
+    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your custom strength blocks</div>
+       <div class="lib-card-list">${state.customStr.map(makeStrRow).join('')}</div>` : '';
+
+  mountSheet(`
+    <h2>Exercise Library</h2>
+    <p class="sub">Browse every session. Tap any to see full details, start it, or log it. Custom sessions can be assigned to any plan day.</p>
+
+    ${customRunSection}${customStrSection}
+
+    <div class="eyebrow" style="margin:${(state.customRuns?.length || state.customStr?.length) ? '20' : '18'}px 0 10px">🏃‍♀️ Run sessions</div>
+    <div class="lib-card-list">${LIB_RUNS.map(makeRunRow).join('')}</div>
+
+    <div class="eyebrow" style="margin:20px 0 10px">🏋️ Strength blocks</div>
+    <div class="lib-card-list">${LIB_STRENGTH.map(makeStrRow).join('')}</div>
+
+    <div class="eyebrow" style="margin:20px 0 10px">🩹 Rehab & recovery</div>
+    <div class="lib-card-list">
+      <button class="lib-card" onclick="openLibStr('kneerehab')">
+        <div class="lc-left">
+          <div class="lc-icon">🩹</div>
+          <div class="lc-body">
+            <div class="lc-name">Knee Rehab Circuit</div>
+            <div class="lc-meta">${window.MOE_DATA.KNEE_REHAB.length} exercises · daily prehab</div>
+          </div>
+        </div>
+        ${libCardChevron()}
+      </button>
+    </div>
+
+    <button class="add-inline" style="margin-top:16px" onclick="openCreateCustom()">＋ Create your own session</button>
+  `);
+}
+
+function openLibRun(id) {
+  const r = allRuns().find(x => x.id === id);
+  if (!r) return;
+  const t = r.label.replace(/'/g, '');
+  const intensityBand = /Zone 4|Zone 5|VO2/.test(r.intensity) ? 'hard' : /Zone 3/.test(r.intensity) ? 'caution' : '';
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">Run session${r.custom ? ' · <span style="color:var(--ember)">custom</span>' : ''}</div>
+    <h2>${r.label}</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px">
+      <span class="pill ${intensityBand || 'go'}">${r.intensity}</span>
+    </div>
+    <div class="wk-metrics">
+      <div class="metric"><div class="m-label">${r.style === 'time' ? 'Duration' : 'Distance'}</div><div class="m-val">${r.target}</div></div>
+      ${r.pace ? `<div class="metric"><div class="m-label">Target pace</div><div class="m-val" style="font-size:13px">${r.pace}</div></div>` : ''}
+    </div>
+    ${r.warmup ? `<div class="coach-note" style="margin-top:14px"><strong>Warm-up:</strong> ${r.warmup}</div>` : ''}
+    <div class="coach-note" style="margin-top:12px"><strong>Coach:</strong> ${r.coach}</div>
+    <button class="btn btn-ember" style="margin-top:20px" onclick="startLibRun('${r.id}')">▶ Start this session</button>
+    <button class="btn btn-ghost" style="margin-top:10px" onclick="openLogSheet('${t}')">Log without timer</button>
+    ${r.custom ? `<button class="btn btn-ghost" style="margin-top:10px;color:var(--ink-3)" onclick="deleteCustomRun('${r.id}')">🗑 Delete from library</button>` : ''}
+  `);
+}
+
+function startLibRun(id) {
+  const r = allRuns().find(x => x.id === id);
+  if (!r) return;
+  const resolved = { title: r.label, run: r, strength: null, coach: r.coach };
+  timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: r.label, steps: buildSteps(resolved), done: [] };
+  timerState.done = new Array(timerState.steps.length).fill(false);
+  renderTimerSheet(resolved);
+  timerState.iv = setInterval(paintTimer, 250);
+}
+
+function openLibStr(id) {
+  const s = id === 'kneerehab'
+    ? { id: 'kneerehab', label: 'Knee Rehab Circuit', block: window.MOE_DATA.KNEE_REHAB }
+    : allStrBlocks().find(x => x.id === id);
+  if (!s) return;
+  const t = s.label.replace(/'/g, '');
+  const exRows = s.block.map(ex => `
+    <div class="exrow">
+      <div style="flex:1">
+        <div class="ex-name">${ex.name}</div>
+        ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
+      </div>
+      <div class="ex-target">${ex.sets}×${ex.target}</div>
+    </div>`).join('');
+  const coach = s.custom ? 'Your custom block — warm up well and track your reps for progressive overload.' : 'Control every rep — quality beats quantity. Progressive overload when it feels clean.';
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">Strength block · ${s.block.length} exercises${s.custom ? ' · <span style="color:var(--ember)">custom</span>' : ''}</div>
+    <h2>${s.label}</h2>
+    <div class="exlist" style="margin-top:14px">${exRows}</div>
+    <div class="coach-note" style="margin-top:14px"><strong>Coach:</strong> ${coach}</div>
+    <button class="btn btn-ember" style="margin-top:20px" onclick="startLibStrSession('${s.id}')">▶ Start this session</button>
+    <button class="btn btn-ghost" style="margin-top:10px" onclick="openLogSheet('${t}')">Log without timer</button>
+    ${s.custom ? `<button class="btn btn-ghost" style="margin-top:10px;color:var(--ink-3)" onclick="deleteCustomStr('${s.id}')">🗑 Delete from library</button>` : ''}
+  `);
+}
+
+function startLibStrSession(id) {
+  const s = id === 'kneerehab'
+    ? { id: 'kneerehab', label: 'Knee Rehab Circuit', block: window.MOE_DATA.KNEE_REHAB }
+    : allStrBlocks().find(x => x.id === id);
+  if (!s) return;
+  const resolved = { title: s.label, run: null, strength: s, coach: s.custom ? 'Your custom session — warm up well and mind the knees.' : '' };
+  timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: s.label, steps: buildSteps(resolved), done: [] };
+  timerState.done = new Array(timerState.steps.length).fill(false);
+  renderTimerSheet(resolved);
+  timerState.iv = setInterval(paintTimer, 250);
+}
+
+/* All run sessions (built-in + custom) */
+function allRuns() { return [...LIB_RUNS, ...(state.customRuns || [])]; }
+/* All strength blocks (built-in + custom) */
+function allStrBlocks() { return [...LIB_STRENGTH, ...(state.customStr || [])]; }
+
+/* --------------- Create custom session --------------- */
+function openCreateCustom() {
+  mountSheet(`
+    <h2>Create custom session</h2>
+    <p class="sub">Build your own run or strength block. It will appear in your library and you can assign it to any day.</p>
+    <div class="seg" id="customTypeSeg" style="margin-bottom:18px">
+      <button data-ct="run" class="on">Run session</button>
+      <button data-ct="strength">Strength block</button>
+    </div>
+    <div id="customForm">${customRunForm()}</div>
+  `);
+  document.getElementById('customTypeSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.getElementById('customTypeSeg').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById('customForm').innerHTML = b.dataset.ct === 'run' ? customRunForm() : customStrForm();
+    bindCustomStrExercises();
+  });
+  bindCustomStrExercises();
+}
+
+function customRunForm() {
+  return `
+    <div class="field"><label>Session name</label><input id="cr_label" placeholder="e.g. Trail Run" /></div>
+    <div class="field"><label>Target (distance or time)</label><input id="cr_target" placeholder="e.g. 15 km or 60 min" /></div>
+    <div class="field"><label>Style</label>
+      <div class="seg" id="cr_styleSeg">
+        <button data-s="distance" class="on">Distance</button>
+        <button data-s="time">Time</button>
+      </div>
+    </div>
+    <div class="field"><label>Intensity / zone</label><input id="cr_intensity" placeholder="e.g. Zone 2 · easy" /></div>
+    <div class="field"><label>Target pace (/km) — optional</label><input id="cr_pace" class="mono" placeholder="5:00–5:30" /></div>
+    <div class="field"><label>Coach note — optional</label><textarea id="cr_coach" placeholder="Tips, cues, focus points…" style="min-height:60px"></textarea></div>
+    <button class="btn btn-ember" id="crSave">Save to library</button>`;
+}
+
+function customStrForm() {
+  return `
+    <div class="field"><label>Block name</label><input id="cs_label" placeholder="e.g. Full-body circuit" /></div>
+    <div id="cs_exList"></div>
+    <button class="btn btn-ghost" id="cs_addEx" style="margin-bottom:14px">＋ Add exercise</button>
+    <button class="btn btn-ember" id="csSave">Save to library</button>`;
+}
+
+let customExercises = [];
+function bindCustomStrExercises() {
+  const addBtn = document.getElementById('cs_addEx');
+  if (!addBtn) return;
+  customExercises = [{ name: '', sets: '3', target: '', note: '' }];
+  renderCustomExList();
+  addBtn.addEventListener('click', () => {
+    customExercises.push({ name: '', sets: '3', target: '', note: '' });
+    renderCustomExList();
+  });
+  const saveBtn = document.getElementById('csSave');
+  if (saveBtn) saveBtn.addEventListener('click', saveCustomStr);
+  const saveBtnRun = document.getElementById('crSave');
+  if (saveBtnRun) saveBtnRun.addEventListener('click', saveCustomRun);
+}
+
+function renderCustomExList() {
+  const el = document.getElementById('cs_exList'); if (!el) return;
+  el.innerHTML = customExercises.map((ex, i) => `
+    <div class="custom-ex-row" data-i="${i}">
+      <div class="field" style="margin-bottom:8px"><label>Exercise ${i+1} name</label><input class="cex-name" data-i="${i}" value="${escapeHtml(ex.name)}" placeholder="e.g. Hip thrust" /></div>
+      <div class="field-row" style="margin-bottom:8px">
+        <div class="field"><label>Sets</label><input class="cex-sets" data-i="${i}" value="${ex.sets}" class="mono" style="width:100%" /></div>
+        <div class="field"><label>Target</label><input class="cex-target" data-i="${i}" value="${escapeHtml(ex.target)}" placeholder="12 reps / 30s" /></div>
+      </div>
+      <div class="field" style="margin-bottom:${i < customExercises.length - 1 ? '0' : '4'}px">
+        <input class="cex-note" data-i="${i}" value="${escapeHtml(ex.note)}" placeholder="Coaching note — optional" />
+      </div>
+      ${customExercises.length > 1 ? `<button onclick="removeCustomEx(${i})" style="border:none;background:none;color:var(--ink-3);cursor:pointer;font-size:12px;margin-bottom:12px;padding:0">✕ Remove</button>` : ''}
+      <hr style="border:none;border-top:1px solid var(--line);margin-bottom:12px">
+    </div>`).join('');
+  // bind live inputs
+  el.querySelectorAll('.cex-name').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].name = e.target.value; }));
+  el.querySelectorAll('.cex-sets').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].sets = e.target.value; }));
+  el.querySelectorAll('.cex-target').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].target = e.target.value; }));
+  el.querySelectorAll('.cex-note').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].note = e.target.value; }));
+  // re-bind save
+  const saveBtn = document.getElementById('csSave'); if (saveBtn) saveBtn.addEventListener('click', saveCustomStr);
+}
+
+function removeCustomEx(i) { customExercises.splice(i, 1); renderCustomExList(); }
+
+function saveCustomRun() {
+  const g = id => (document.getElementById(id)?.value || '').trim();
+  if (!g('cr_label')) { toast('Give the session a name'); return; }
+  const styleSeg = document.getElementById('cr_styleSeg');
+  const style = styleSeg ? (styleSeg.querySelector('.on')?.dataset.s || 'distance') : 'distance';
+  const run = {
+    id: 'custom_' + uid(), label: g('cr_label'), style, target: g('cr_target') || '—',
+    intensity: g('cr_intensity') || 'Your pace', pace: g('cr_pace') || null,
+    coach: g('cr_coach') || 'Your custom session — listen to your body.',
+    custom: true,
+  };
+  state.customRuns = state.customRuns || [];
+  state.customRuns.push(run);
+  save(); closeSheet();
+  toast(`"${run.label}" added to library`);
+}
+
+function saveCustomStr() {
+  const label = (document.getElementById('cs_label')?.value || '').trim();
+  if (!label) { toast('Give the block a name'); return; }
+  const validEx = customExercises.filter(e => e.name.trim());
+  if (!validEx.length) { toast('Add at least one exercise'); return; }
+  const block = validEx.map(e => ({ name: e.name.trim(), sets: e.sets || '3', target: e.target.trim() || '10 reps', note: e.note.trim() }));
+  const str = { id: 'custom_' + uid(), label, block, custom: true };
+  state.customStr = state.customStr || [];
+  state.customStr.push(str);
+  save(); closeSheet();
+  toast(`"${label}" added to library`);
+}
+
+function deleteCustomRun(id) {
+  state.customRuns = (state.customRuns || []).filter(r => r.id !== id);
+  save(); closeSheet(); openLibrary();
+}
+function deleteCustomStr(id) {
+  state.customStr = (state.customStr || []).filter(s => s.id !== id);
+  save(); closeSheet(); openLibrary();
 }
 
 /* --------------- PLAN tab --------------- */
@@ -846,6 +1135,16 @@ function renderPlan() {
         <span class="muted">km / week — building gradually (max +10%/wk)</span>
       </div>
     </div>
+
+    <div class="section-title">Exercise library</div>
+    <div class="card" style="padding:14px 16px">
+      <p class="muted" style="font-size:13px;line-height:1.5;margin-bottom:14px">Browse all run sessions and strength blocks, start any session directly, or create your own custom ones.</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="openLibrary()">📚 Browse library</button>
+        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="openCreateCustom()">＋ Create custom</button>
+      </div>
+    </div>
+
     ${renderWeeklyNotes()}
   `;
   bindWeeklyNotes();
@@ -1273,6 +1572,9 @@ Object.assign(window, {
   delSession, delGoal, openDayDetail, startWorkout, closeSheet,
   toggleStep, openDayEditor, pickLib, saveDayEditor, resetDay,
   openWeightSheet, delWeight,
+  openLibrary, openLibRun, openLibStr, startLibRun, startLibStrSession,
+  openCreateCustom, removeCustomEx, deleteCustomRun, deleteCustomStr,
+  triggerWeatherDetect,
 });
 
 /* --------------- Register service worker (PWA) --------------- */
