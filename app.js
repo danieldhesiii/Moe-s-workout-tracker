@@ -3,7 +3,7 @@
    State in localStorage. No backend. Mobile-first.
    ============================================================ */
 
-const { WEEK_TEMPLATE, CHECKIN_QUESTIONS, SWAP_OPTIONS, WEATHER_OPTS, MOOD_OPTS } = window.MOE_DATA;
+const { WEEK_TEMPLATE, CHECKIN_QUESTIONS, SWAP_OPTIONS, WEATHER_OPTS, MOOD_OPTS, LIB_RUNS, LIB_STRENGTH } = window.MOE_DATA;
 
 /* ---------------- State ---------------- */
 const STORE_KEY = "moe_training_log_v1";
@@ -14,6 +14,7 @@ const defaultState = () => ({
   goals: [
     { id: uid(), race: "Full Marathon", date: nextYear(), targetKm: 42.2, note: "Primary goal — flexible date", progress: 0 },
   ],
+  plan: {},                  // per-day overrides { dow: {rest|cross, runId, strengthId} }
   settings: { weeklyTarget: 75 },
 });
 
@@ -51,6 +52,36 @@ function seedDemo(s) {
   return s;
 }
 
+/* ---------------- Effective plan (defaults + Moe's overrides) ---------------- */
+// Returns the day Moe actually sees: her custom override if set, else the default.
+function getDay(dow) {
+  const c = state.plan && state.plan[dow];
+  return c ? materializeDay(dow, c) : WEEK_TEMPLATE[dow];
+}
+function materializeDay(dow, c) {
+  const day = WEEK_TEMPLATE[dow].day;
+  if (c.rest) return { day, type: "rest", title: "Rest Day", focus: "Recovery", run: null, strength: null, coach: "Full rest — recovery is where the adaptation happens." };
+
+  const strLib = c.strengthId ? LIB_STRENGTH.find(s => s.id === c.strengthId) : null;
+  const strength = strLib ? { label: strLib.label, block: strLib.block } : null;
+
+  if (c.cross) {
+    return { day, type: "cross", title: "Cross-Training" + (strength ? " + " + strength.label : ""), focus: "Low-impact cross-training",
+      run: { style: "time", label: "Bike / swim / row", target: "45 min", intensity: "Zone 2 · low-impact" }, strength,
+      coach: "Aerobic work with zero pounding on the knees." };
+  }
+
+  const run = c.runId ? LIB_RUNS.find(r => r.id === c.runId) : null;
+  let type, title;
+  if (run && strength) { type = "run+strength"; title = `${run.label} + ${strength.label}`; }
+  else if (run) { type = "run"; title = run.label; }
+  else if (strength) { type = "strength"; title = strength.label; }
+  else { type = "rest"; title = "Rest Day"; }
+  const focus = run ? run.intensity : strength ? strength.label : "Recovery";
+  const coach = run?.coach || "Your custom session — warm up well and mind the knees.";
+  return { day, type, title, focus, run, strength, coach };
+}
+
 /* ---------------- Readiness engine ---------------- */
 /* Turns the pre-workout check-in into an adaptive recommendation.
    Injury prevention is weighted hardest — sore knees cap the day. */
@@ -72,7 +103,7 @@ function computeReadiness(answers) {
   else if (score >= 55) { band = "amber"; ringCol = "var(--amber)"; }
   else { band = "red"; ringCol = "var(--ember)"; }
 
-  const plan = WEEK_TEMPLATE[new Date().getDay()];
+  const plan = getDay(new Date().getDay());
   const rec = buildRecommendation(band, kneeFlag, plan);
   return { score, band, ringCol, kneeFlag, rec, plan };
 }
@@ -129,7 +160,7 @@ function updateHeader() {
 
 /* ---------------- TODAY ---------------- */
 function renderToday() {
-  const plan = WEEK_TEMPLATE[new Date().getDay()];
+  const plan = getDay(new Date().getDay());
   const ci = state.checkins[todayKey()];
 
   let html = `<div class="today-hero">
@@ -242,19 +273,102 @@ function resolveSwap(plan, swapId) {
 
 /* ---------------- Plan day detail ---------------- */
 function openDayDetail(dow) {
-  const plan = WEEK_TEMPLATE[dow];
+  const plan = getDay(dow);
   const resolved = resolveSwap(plan, "planned");
   const t = resolved.title.replace(/'/g, "");
   const isRest = plan.type === "rest";
+  const custom = state.plan && state.plan[dow];
   mountSheet(`
-    <div class="eyebrow" style="margin-top:2px">${plan.day} · ${plan.focus}</div>
+    <div class="eyebrow" style="margin-top:2px">${plan.day} · ${plan.focus} ${custom ? '· <span style="color:var(--ember)">customised</span>' : ""}</div>
     <h2 style="display:flex;align-items:center;gap:10px">${resolved.title} ${resolved.tag}</h2>
     <div style="margin-top:14px">${workoutBodyHtml(resolved)}</div>
-    ${isRest
-      ? `<button class="btn btn-ghost" style="margin-top:16px" onclick="closeSheet()">Close</button>`
-      : `<button class="btn btn-ember" style="margin-top:16px" onclick="startWorkout('${t}', ${dow}, 'planned')">▶ Start workout</button>
+    ${isRest ? "" : `<button class="btn btn-ember" style="margin-top:16px" onclick="startWorkout('${t}', ${dow}, 'planned')">▶ Start workout</button>
          <button class="btn btn-ghost" style="margin-top:10px" onclick="openLogSheet('${t}')">Log without timer</button>`}
+    <button class="btn btn-ghost" style="margin-top:10px" onclick="openDayEditor(${dow})">✎ Edit this day</button>
   `);
+}
+
+/* ---------------- Day editor (customise the plan from the library) ---------------- */
+let planDraft = {};
+function openDayEditor(dow) {
+  const def = WEEK_TEMPLATE[dow];
+  const c = state.plan && state.plan[dow];
+  planDraft = c
+    ? { mode: c.rest ? "rest" : c.cross ? "cross" : "train", runId: c.runId || null, strengthId: c.strengthId || null }
+    : { mode: def.type === "rest" ? "rest" : "train", runId: def.libRun || null, strengthId: def.libStr || null };
+  renderDayEditor(dow);
+}
+function renderDayEditor(dow) {
+  const def = WEEK_TEMPLATE[dow];
+  const d = planDraft;
+  const hasOverride = state.plan && state.plan[dow];
+  const runOpts = [{ id: null, label: "No run", note: "" }, ...LIB_RUNS];
+  const strOpts = [{ id: null, label: "No strength", note: "" }, ...LIB_STRENGTH];
+
+  const pick = (arr, sel, kind) => arr.map(o => `
+    <button class="lib-row ${sel === o.id ? "on" : ""}" onclick="pickLib('${kind}', ${o.id === null ? "null" : `'${o.id}'`}, ${dow})">
+      <span class="lib-name">${o.label}</span>
+      <span class="lib-meta">${o.target ? `<span class="mono">${o.target}</span> · ` : ""}${o.intensity || o.note || (o.block ? o.block.length + " exercises" : "")}</span>
+      <span class="lib-tick">${sel === o.id ? "✓" : ""}</span>
+    </button>`).join("");
+
+  mountSheet(`
+    <div class="eyebrow" style="margin-top:2px">Customise · ${def.day}</div>
+    <h2>Edit ${def.day}</h2>
+    <p class="sub">Set the day and pick sessions from the library. Injury-first — keep at least two rest days a week.</p>
+
+    <div class="field"><label>Day type</label>
+      <div class="seg" id="modeSeg">
+        <button data-m="train" class="${d.mode === "train" ? "on" : ""}">Train</button>
+        <button data-m="cross" class="${d.mode === "cross" ? "on" : ""}">Cross</button>
+        <button data-m="rest" class="${d.mode === "rest" ? "on" : ""}">Rest</button>
+      </div>
+    </div>
+
+    ${d.mode === "rest" ? `<div class="card" style="text-align:center;padding:26px 18px"><div style="font-size:34px">☕</div><p class="muted" style="margin-top:8px;font-size:13.5px">Full rest day — recovery & optional gentle mobility. Nothing to pick.</p></div>` : ""}
+
+    ${d.mode === "train" ? `<div class="lib-group"><div class="eyebrow" style="margin:14px 2px 8px">Run session</div><div class="lib-list">${pick(runOpts, d.runId, "run")}</div></div>` : ""}
+
+    ${d.mode !== "rest" ? `<div class="lib-group"><div class="eyebrow" style="margin:16px 2px 8px">Strength / rehab</div><div class="lib-list">${pick(strOpts, d.strengthId, "str")}</div></div>` : ""}
+
+    <button class="btn btn-ember" style="margin-top:18px" onclick="saveDayEditor(${dow})">Save ${def.day}</button>
+    ${hasOverride ? `<button class="btn btn-ghost" style="margin-top:10px" onclick="resetDay(${dow})">↺ Reset to default</button>` : ""}
+  `);
+  document.getElementById("modeSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    planDraft.mode = b.dataset.m; renderDayEditor(dow);
+  });
+}
+function pickLib(kind, id, dow) {
+  if (kind === "run") planDraft.runId = id; else planDraft.strengthId = id;
+  renderDayEditor(dow);
+}
+function saveDayEditor(dow) {
+  const d = planDraft;
+  if (!state.plan) state.plan = {};
+  if (d.mode === "rest") state.plan[dow] = { rest: true };
+  else if (d.mode === "cross") state.plan[dow] = { cross: true, strengthId: d.strengthId || null };
+  else {
+    if (!d.runId && !d.strengthId) { toast("Pick a run or strength, or set to Rest"); return; }
+    state.plan[dow] = { runId: d.runId || null, strengthId: d.strengthId || null };
+  }
+  save(); closeSheet();
+  if (currentTab === "plan") renderPlan(); else render();
+  toast(`${WEEK_TEMPLATE[dow].day} updated`);
+  warnRestDays();
+}
+function resetDay(dow) {
+  if (state.plan) delete state.plan[dow];
+  save(); closeSheet();
+  if (currentTab === "plan") renderPlan(); else render();
+  toast(`${WEEK_TEMPLATE[dow].day} reset to default`);
+}
+function restDayCount() {
+  let n = 0; for (let dow = 0; dow < 7; dow++) if (getDay(dow).type === "rest") n++;
+  return n;
+}
+function warnRestDays() {
+  if (restDayCount() < 2) toast("⚠️ Under 2 rest days — watch those knees");
 }
 
 /* ---------------- Workout timer (follow-along player) ---------------- */
@@ -284,7 +398,7 @@ function buildSteps(resolved) {
 function startWorkout(title, dow, swapId) {
   if (dow == null) dow = new Date().getDay();
   if (!swapId) swapId = "planned";
-  const resolved = resolveSwap(WEEK_TEMPLATE[dow], swapId);
+  const resolved = resolveSwap(getDay(dow), swapId);
   resolved.title = title || resolved.title;
   timerState = { accMs: 0, startAt: Date.now(), running: true, iv: null, title: resolved.title, steps: buildSteps(resolved), done: [] };
   timerState.done = new Array(timerState.steps.length).fill(false);
@@ -419,7 +533,7 @@ function openSwap() {
 let logDraft = {};
 function openLogSheet(presetTitle, prefill, opts) {
   prefill = prefill || {}; opts = opts || {};
-  const plan = WEEK_TEMPLATE[new Date().getDay()];
+  const plan = getDay(new Date().getDay());
   logDraft = { type: "run", title: presetTitle || plan.title, weather: null, mood: null, date: todayKey() };
   mountSheet(`
     <h2>Log a session</h2>
@@ -493,7 +607,7 @@ function renderPlan() {
   const order = [1, 2, 3, 4, 5, 6, 0];
   const todayDow = new Date().getDay();
   let cards = order.map(dow => {
-    const p = WEEK_TEMPLATE[dow];
+    const p = getDay(dow);
     const isToday = dow === todayDow, isRest = p.type === "rest";
     const icon = isRest ? "☕" : p.type === "run+strength" ? "🏃‍♀️＋🏋️" : "🏃‍♀️";
     const tags = [];
@@ -508,10 +622,15 @@ function renderPlan() {
     </button>`;
   }).join("");
 
+  let runDays = 0, restDays = 0;
+  for (let dow = 0; dow < 7; dow++) { const ty = getDay(dow).type; if (ty === "rest") restDays++; else if (ty.includes("run") || ty === "cross") runDays++; }
+  const lowRest = restDays < 2;
+
   view.innerHTML = `
     <div class="eyebrow">Weekly structure</div>
     <div class="h-big">Your training week</div>
-    <p class="muted" style="font-size:13.5px;margin:8px 2px 4px;line-height:1.5">5 run days · 2 rest · strength stacked on run days · knee rehab woven throughout. Progressive overload, injury-first.</p>
+    <p class="muted" style="font-size:13.5px;margin:8px 2px 4px;line-height:1.5">${runDays} active · ${restDays} rest · strength on run days · knee rehab throughout. <b style="color:var(--ink-2)">Tap any day to view or ✎ customise it.</b></p>
+    ${lowRest ? `<div class="card" style="margin-top:12px;border-color:var(--ember);background:var(--ember-soft)"><div style="font-size:13.5px;color:var(--ink);line-height:1.5"><b>⚠️ Only ${restDays} rest day${restDays === 1 ? "" : "s"} this week.</b> Injury-first — aim for at least 2 to protect the knees.</div></div>` : ""}
     <div class="section-title">This week</div>
     <div class="week-grid">${cards}</div>
     <div class="card" style="margin-top:16px">
@@ -688,7 +807,7 @@ function toast(msg) {
 function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // expose for inline onclick
-Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal, openDayDetail, startWorkout, closeSheet, toggleStep });
+Object.assign(window, { openCheckin, openSwap, openLogSheet, openGoalSheet, delSession, delGoal, openDayDetail, startWorkout, closeSheet, toggleStep, openDayEditor, pickLib, saveDayEditor, resetDay });
 
 /* ---------------- Boot ---------------- */
 try {
