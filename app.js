@@ -2625,29 +2625,34 @@ function initMotion() {
 }
 
 // Called after every render() to give each page a fresh, animated entrance.
+let __lastViewKey = null;
 window.__animView = function () {
   const root = document.getElementById('view');
   if (!root) return;
-  // Snap to top on page change so pages feel discrete.
-  if (lenis) lenis.scrollTo(0, { immediate: true }); else { window.scrollTo(0, 0); root.scrollTop = 0; }
-  if (REDUCE_MOTION) return;
+  // Only treat an actual page / sub-page change as a "navigation" — NOT in-page
+  // re-renders (favouriting, drag-reorder, notes autosave). This stops elements
+  // from re-animating / jumping every time you tap something.
+  const key = currentTab + ':' + (SUBPAGES[currentTab] ? subTab[currentTab] : '');
+  const changed = key !== __lastViewKey;
+  __lastViewKey = key;
+  if (!changed) return;
 
-  // Staggered word/char reveal on the big display heading.
+  // Snap to top on real page changes so pages feel discrete.
+  if (lenis) lenis.scrollTo(0, { immediate: true }); else { root.scrollTop = 0; }
+  if (REDUCE_MOTION || !window.gsap) return;
+
+  // Gentle heading reveal.
   if (typeof Splitting !== 'undefined') {
     root.querySelectorAll('.h-big').forEach(h => {
       try {
         const res = Splitting({ target: h, by: 'chars' });
-        if (window.gsap && res[0] && res[0].chars) {
-          gsap.from(res[0].chars, { yPercent: 55, opacity: 0, stagger: 0.012, duration: 0.5, ease: 'power3.out', clearProps: 'all' });
-        }
+        if (res[0] && res[0].chars) gsap.from(res[0].chars, { yPercent: 45, opacity: 0, stagger: 0.01, duration: 0.42, ease: 'power3.out', clearProps: 'all' });
       } catch {}
     });
   }
-  // Card / row entrance.
-  if (window.gsap) {
-    const items = root.querySelectorAll('.card, .day-card, .lib-card, .stat, .segchip, .empty');
-    gsap.from(items, { y: 12, opacity: 0, duration: 0.42, stagger: 0.025, ease: 'power2.out', clearProps: 'all' });
-  }
+  // Card / row entrance (not chips or nav — those must stay put).
+  const items = root.querySelectorAll('.card, .day-card, .lib-card, .stat, .empty');
+  gsap.from(items, { y: 10, opacity: 0, duration: 0.38, stagger: 0.02, ease: 'power2.out', clearProps: 'all' });
 };
 
 /* --------------- Expose for inline onclick --------------- */
