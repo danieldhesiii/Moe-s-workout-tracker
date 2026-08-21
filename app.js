@@ -574,8 +574,8 @@ function connectStrava() {
     client_id: STRAVA_CLIENT_ID,
     redirect_uri: STRAVA_REDIRECT,
     response_type: 'code',
-    scope: 'activity:read_all',
-    approval_prompt: 'auto',
+    scope: 'read,activity:read_all,profile:read_all',
+    approval_prompt: 'force',
   });
   window.location.href = 'https://www.strava.com/oauth/authorize?' + params.toString();
 }
