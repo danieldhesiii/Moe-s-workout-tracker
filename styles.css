@@ -652,6 +652,27 @@ body {
 }
 
 .lc-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+
+/* Strava imported run cards */
+.strava-card {
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+}
+.strava-card-top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-bottom: 9px;
+}
+.strava-card-title { font-weight: 600; font-size: 14px; color: var(--ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strava-card-date { font-size: 11.5px; color: var(--ink-3); flex: none; }
+.strava-metrics { display: flex; flex-wrap: wrap; gap: 6px; }
+.strava-metric {
+  background: var(--ember-soft); border-radius: 8px; padding: 4px 9px;
+  display: flex; align-items: baseline; gap: 3px;
+}
+.sm-val { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+.sm-unit { font-size: 10.5px; color: var(--ink-3); }
 .fav-star {
   flex: none; width: 32px; height: 32px; border-radius: 50%;
   display: grid; place-items: center; font-size: 19px; line-height: 1;

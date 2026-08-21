@@ -367,6 +367,7 @@ const SUBPAGES = {
     { k: 'runs',     label: 'Runs',       ic: '🏃‍♀️' },
     { k: 'strength', label: 'Strength',   ic: '🏋️' },
     { k: 'rehab',    label: 'Rehab',      ic: '🩹' },
+    { k: 'strava',   label: 'Strava',     ic: '🔴' },
   ],
 };
 const subTab = { progress: 'overview', library: 'favs' };
@@ -2269,7 +2270,43 @@ function renderLibrary() {
       </button>
     </div>`;
 
-  const pages = { favs: favBlock, runs: runsPage, strength: strPage, rehab: rehabPage };
+  // ---- Strava sub-page ----
+  const stravaRuns = (state.sessions || [])
+    .filter(s => s.source === 'strava')
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const stravaPage = stravaRuns.length ? `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 14px">
+      <div class="eyebrow">${stravaRuns.length} run${stravaRuns.length !== 1 ? 's' : ''} imported</div>
+      <button class="add-pill" onclick="syncFromStrava()" style="font-size:12px;padding:6px 12px">↻ Sync</button>
+    </div>
+    <div class="lib-card-list">
+      ${stravaRuns.map(s => {
+        const d = s.date ? new Date(s.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        const metrics = [
+          s.distance  ? `<span class="strava-metric"><span class="sm-val">${s.distance}</span><span class="sm-unit">km</span></span>` : '',
+          s.pace      ? `<span class="strava-metric"><span class="sm-val">${s.pace}</span><span class="sm-unit">/km</span></span>` : '',
+          s.duration  ? `<span class="strava-metric"><span class="sm-val">${s.duration}</span><span class="sm-unit">min</span></span>` : '',
+          s.hr        ? `<span class="strava-metric"><span class="sm-val">${s.hr}</span><span class="sm-unit">bpm</span></span>` : '',
+          s.elevation ? `<span class="strava-metric"><span class="sm-val">${s.elevation}</span><span class="sm-unit">m ↑</span></span>` : '',
+        ].filter(Boolean).join('');
+        return `
+          <div class="strava-card">
+            <div class="strava-card-top">
+              <div class="strava-card-title">${s.title || 'Run'}</div>
+              <div class="strava-card-date">${d}</div>
+            </div>
+            <div class="strava-metrics">${metrics}</div>
+          </div>`;
+      }).join('')}
+    </div>` : `
+    <div class="empty">
+      <div class="e-emoji">🔴</div>
+      <p>No Strava runs yet.<br>Tap below to sync from Strava.</p>
+      <button class="btn" style="margin-top:16px" onclick="syncFromStrava()">Sync from Strava</button>
+    </div>`;
+
+  const pages = { favs: favBlock, runs: runsPage, strength: strPage, rehab: rehabPage, strava: stravaPage };
 
   view.innerHTML = `
     <div class="page-head">
