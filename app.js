@@ -11,7 +11,7 @@ const { WEEK_TEMPLATE, CHECKIN_QUESTIONS, SWAP_OPTIONS, WEATHER_OPTS, MOOD_OPTS,
 const STORE_KEY = 'moe_training_log_v1';
 const AGE = 29;
 const MAX_HR = 220 - AGE; // 191 bpm
-const TAB_ORDER = ['today', 'plan', 'progress', 'goals', 'library'];
+const TAB_ORDER = ['today', 'plan', 'favorites', 'progress', 'goals', 'library'];
 
 /* --------------- State --------------- */
 const defaultState = () => ({
@@ -518,14 +518,12 @@ function openDrawer() {
   closeTabMenu();
   const back = document.createElement('div');
   back.className = 'drawer-backdrop';
-  const favN = favCount();
   back.innerHTML = `
     <aside class="drawer" role="menu">
       <div class="drawer-head">
         <span class="brand-mark">M</span>
         <div><div class="brand-name">Moe's Log</div><div class="brand-date">Menu</div></div>
       </div>
-      <button class="drawer-item" data-act="favorites"><span class="di-ic">⭐</span>Favourites${favN ? `<span class="di-badge">${favN}</span>` : ''}</button>
       <button class="drawer-item" data-act="routes"><span class="di-ic">🗺️</span>My routes</button>
       <button class="drawer-item" data-act="pace"><span class="di-ic">⏱️</span>Pace calculator</button>
       <div class="drawer-sep"></div>

@@ -1,5 +1,5 @@
 /* Service worker — offline-first shell cache for Moe's Training Log */
-const CACHE = 'moe-v19';
+const CACHE = 'moe-v20';
 const SHELL = [
   '/',
   '/index.html',
