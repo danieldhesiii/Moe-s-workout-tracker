@@ -533,6 +533,9 @@ function openDrawer() {
       <button class="drawer-item" data-act="create"><span class="di-ic">➕</span>Create custom session</button>
       <div class="drawer-sep"></div>
       <button class="drawer-item" data-act="reset"><span class="di-ic">♻️</span>Reset data</button>
+      <div class="drawer-sep"></div>
+      <button class="drawer-item" data-act="strava-connect"><span class="di-ic">🔗</span>Connect Strava</button>
+      <button class="drawer-item" data-act="strava-sync"><span class="di-ic">🏃</span>Sync from Strava</button>
       <div class="drawer-foot"><span id="drawerSync">${syncReady ? 'Synced to cloud ✓' : 'Offline — saved on device'}</span></div>
     </aside>`;
   back.addEventListener('click', e => { if (e.target === back) closeDrawer(); });
@@ -556,6 +559,53 @@ function drawerAction(act) {
     case 'checkin':   openCheckin(); break;
     case 'create':    openCreateCustom(); break;
     case 'reset':     openResetSheet(); break;
+    case 'strava-connect': connectStrava(); break;
+    case 'strava-sync':    syncFromStrava(); break;
+  }
+}
+
+/* --------------- Strava integration --------------- */
+const STRAVA_CLIENT_ID = '273694';
+const STRAVA_REDIRECT = window.location.origin + '/api/strava-callback';
+
+function connectStrava() {
+  const params = new URLSearchParams({
+    client_id: STRAVA_CLIENT_ID,
+    redirect_uri: STRAVA_REDIRECT,
+    response_type: 'code',
+    scope: 'activity:read_all',
+    approval_prompt: 'auto',
+  });
+  window.location.href = 'https://www.strava.com/oauth/authorize?' + params.toString();
+}
+
+async function syncFromStrava() {
+  toast('Syncing from Strava…');
+  try {
+    const res = await fetch('/api/strava-sync');
+    if (res.status === 401) {
+      const body = await res.json().catch(() => ({}));
+      if (body.error === 'not_connected') {
+        toast('Connect Strava first via the ☰ menu');
+      } else {
+        toast('Strava session expired — reconnecting…');
+        setTimeout(connectStrava, 1200);
+      }
+      return;
+    }
+    if (!res.ok) { toast('Strava sync failed — try again'); return; }
+    const { sessions } = await res.json();
+    let added = 0;
+    for (const s of sessions) {
+      if (!state.sessions.find(x => x.id === s.id)) {
+        state.sessions.push(s);
+        added++;
+      }
+    }
+    if (added > 0) { save(); render(); }
+    toast(added > 0 ? `${added} run${added > 1 ? 's' : ''} imported from Strava ✓` : 'Already up to date');
+  } catch {
+    toast('Could not reach Strava — check your connection');
   }
 }
 document.getElementById('menuBtn')?.addEventListener('click', openDrawer);
@@ -2784,7 +2834,23 @@ Object.assign(window, {
   openPaceCalc, openCycleSetup, clearCycle, logPeriodStart, openCycleDetail,
   openRoutes, openRoute, openAddRoute, deleteRoute,
   triggerWeatherDetect,
+  connectStrava, syncFromStrava,
 });
+
+/* Handle redirect back from Strava OAuth */
+(function handleStravaRedirect() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('strava') === 'connected') {
+    history.replaceState({}, '', window.location.pathname);
+    setTimeout(() => {
+      toast('Strava connected! Syncing your runs…');
+      syncFromStrava();
+    }, 800);
+  } else if (p.get('strava') === 'denied') {
+    history.replaceState({}, '', window.location.pathname);
+    toast('Strava connection cancelled');
+  }
+})();
 
 /* --------------- Register service worker (PWA) + auto-update --------------- */
 if ('serviceWorker' in navigator) {
