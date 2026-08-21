@@ -524,6 +524,8 @@ function openDrawer() {
         <span class="brand-mark">M</span>
         <div><div class="brand-name">Moe's Log</div><div class="brand-date">Menu</div></div>
       </div>
+      <button class="drawer-item" data-act="guide"><span class="di-ic">📖</span>How to use the app</button>
+      <div class="drawer-sep"></div>
       <button class="drawer-item" data-act="routes"><span class="di-ic">🗺️</span>My routes</button>
       <button class="drawer-item" data-act="pace"><span class="di-ic">⏱️</span>Pace calculator</button>
       <div class="drawer-sep"></div>
@@ -547,12 +549,13 @@ function openDrawer() {
 function closeDrawer() { const b = document.querySelector('.drawer-backdrop'); if (b) b.remove(); }
 function drawerAction(act) {
   switch (act) {
+    case 'guide':     openGuide(); break;
     case 'favorites': currentTab = 'favorites'; render(); break;
     case 'routes':    openRoutes(); break;
     case 'pace':      openPaceCalc(); break;
     case 'checkin':   openCheckin(); break;
     case 'create':    openCreateCustom(); break;
-    case 'reset':     if (confirm('Reset all data on this device? This cannot be undone.')) resetAll(); break;
+    case 'reset':     openResetSheet(); break;
   }
 }
 document.getElementById('menuBtn')?.addEventListener('click', openDrawer);
@@ -560,7 +563,121 @@ document.getElementById('menuBtn')?.addEventListener('click', openDrawer);
 function resetAll() {
   try { localStorage.removeItem(STORE_KEY); } catch {}
   state = seedDemo(defaultState());
-  save(); currentTab = 'today'; render(); toast('Data reset');
+  save(); currentTab = 'today'; render(); toast('Everything reset');
+}
+
+/* --------------- How-to guide --------------- */
+function openGuide() {
+  const sec = (ic, title, rows) =>
+    `<div class="guide-sec">
+       <div class="guide-h">${ic} ${title}</div>
+       ${rows.map(([a, b]) => `<div class="guide-row"><b>${a}</b><span>${b}</span></div>`).join('')}
+     </div>`;
+  mountSheet(`
+    <h2>How to use Moe's Log</h2>
+    <p class="sub">A quick tour of what's where. Tap anything in the app to explore — nothing here can break it.</p>
+
+    ${sec('📍', 'The tabs along the bottom', [
+      ['Today', "Your session for today, plus the daily check-in and weekly progress."],
+      ['Plan', "Your whole training week. Tap any day to view or ✎ customise it."],
+      ['⭐ Saved', "Everything you've starred — your go-to sessions & exercises."],
+      ['＋ Log', "Record a workout — with the follow-along timer or a quick manual entry."],
+      ['Stats', "Your numbers. Tap the chips: Overview · Body · History."],
+      ['Goals', "Races & events with a countdown to each."],
+      ['Library', "Every session & exercise. Chips: Favourites · Runs · Strength · Rehab."],
+    ])}
+
+    ${sec('💗', 'Daily check-in', [
+      ['Where', "Today → “Start check-in”, or ☰ menu → Daily check-in."],
+      ['What it does', "Rate sleep, legs & knees 1–5. It sets today's session for you and, if knees are sore, swaps to low-impact + rehab."],
+      ['Knee health', "Your knee ratings build the Knee Health trend in Stats → Body."],
+    ])}
+
+    ${sec('📝', 'Logging a workout', [
+      ['Quick', "Tap ＋ and fill in distance / time / notes."],
+      ['Guided', "Open a session in Library → “Start” for a step-by-step timer."],
+    ])}
+
+    ${sec('⭐', 'Favourites', [
+      ['Save', "Tap the ☆ on any session or exercise (in Library or its detail)."],
+      ['Find them', "They appear in the Saved tab and at the top of Library."],
+    ])}
+
+    ${sec('🛠️', 'Where to update things', [
+      ['Weekly plan', "Plan tab → tap a day → ✎ customise (drag exercises to reorder)."],
+      ['Personal bests', "Stats → Overview → “Edit / Add” on the PB card."],
+      ['Body weight', "Stats → Body → add a weight."],
+      ['Goals / races', "Goals tab → add or edit."],
+      ['Routes', "☰ menu → My routes."],
+      ['Cycle tracking', "The phase chip on the Today screen."],
+    ])}
+
+    ${sec('☰', 'The menu (top-left)', [
+      ['Holds', "This guide, routes, pace calculator, check-in, create custom session, and reset."],
+    ])}
+
+    <button class="btn btn-ember" style="margin-top:8px" onclick="closeSheet()">Got it 👍</button>
+  `);
+}
+
+/* --------------- Reset data (granular) --------------- */
+const RESET_OPTS = [
+  { k: 'sessions',  ic: '🏃‍♀️', label: 'Logged sessions',      desc: 'Your training history' },
+  { k: 'checkins',  ic: '💗',   label: 'Daily check-ins',      desc: 'Readiness & knee ratings' },
+  { k: 'weights',   ic: '⚖️',   label: 'Body weight log',      desc: 'All weigh-ins' },
+  { k: 'manualPBs', ic: '🏅',   label: 'Personal bests',       desc: 'Manually entered PBs' },
+  { k: 'custom',    ic: '✨',   label: 'Custom & saved',       desc: 'Custom sessions + saved exercises' },
+  { k: 'favorites', ic: '⭐',   label: 'Favourites',           desc: 'Your starred items' },
+  { k: 'plan',      ic: '🗓️',   label: 'Weekly plan changes',  desc: 'Revert to the default week' },
+  { k: 'goals',     ic: '🎯',   label: 'Goals & events',       desc: 'Back to the default goal' },
+  { k: 'routes',    ic: '🗺️',   label: 'Saved routes',         desc: 'All saved routes' },
+  { k: 'notes',     ic: '📝',   label: 'Weekly notes',         desc: 'Your written notes' },
+  { k: 'cycle',     ic: '🌙',   label: 'Cycle tracking',       desc: 'Period / phase setup' },
+];
+function openResetSheet() {
+  mountSheet(`
+    <h2>Reset data</h2>
+    <p class="sub">Pick exactly what to clear — you don't have to wipe everything. This can't be undone.</p>
+    <div id="resetList">
+      ${RESET_OPTS.map(o => `
+        <button class="opt-row" data-k="${o.k}">
+          <span class="opt-ic">${o.ic}</span>
+          <span><span class="opt-label">${o.label}</span><span class="opt-desc">${o.desc}</span></span>
+          <span class="opt-check"></span>
+        </button>`).join('')}
+    </div>
+    <button class="btn btn-ember" id="resetSelBtn" style="margin-top:14px">Reset selected</button>
+    <button class="btn btn-ghost" id="resetAllBtn" style="margin-top:10px;color:var(--ember);border-color:var(--ember)">Reset everything (fresh start)</button>
+  `);
+  document.getElementById('resetList').addEventListener('click', e => {
+    const row = e.target.closest('.opt-row'); if (!row) return;
+    row.classList.toggle('on');
+  });
+  document.getElementById('resetSelBtn').addEventListener('click', () => {
+    const keys = new Set([...document.querySelectorAll('.opt-row.on')].map(r => r.dataset.k));
+    if (!keys.size) { toast('Nothing selected'); return; }
+    if (!confirm(`Reset ${keys.size} item${keys.size === 1 ? '' : 's'}? This can't be undone.`)) return;
+    doReset(keys);
+    closeSheet(); toast('Selected data reset');
+  });
+  document.getElementById('resetAllBtn').addEventListener('click', () => {
+    if (!confirm('Reset EVERYTHING back to a fresh start? This cannot be undone.')) return;
+    resetAll(); closeSheet();
+  });
+}
+function doReset(keys) {
+  if (keys.has('sessions'))  state.sessions = [];
+  if (keys.has('checkins'))  state.checkins = {};
+  if (keys.has('weights'))   state.weights = [];
+  if (keys.has('manualPBs')) state.manualPBs = {};
+  if (keys.has('custom'))  { state.customRuns = []; state.customStr = []; state.savedEx = []; }
+  if (keys.has('favorites')) state.favorites = { runs: [], str: [], ex: [] };
+  if (keys.has('plan'))      state.plan = {};
+  if (keys.has('goals'))     state.goals = defaultState().goals;
+  if (keys.has('routes'))    state.routes = [];
+  if (keys.has('notes'))     state.weeklyNotes = {};
+  if (keys.has('cycle'))     state.cycle = {};
+  save(); currentTab = 'today'; render();
 }
 
 function updateHeader() {

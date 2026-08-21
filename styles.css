@@ -525,6 +525,35 @@ body {
 .subpage { animation: subfade .3s ease; }
 @keyframes subfade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+/* how-to guide */
+.guide-sec { margin: 16px 0; padding: 14px; background: var(--paper); border-radius: var(--radius-sm); }
+.guide-h { font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+.guide-row { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13.5px; line-height: 1.45; }
+.guide-row:first-of-type { border-top: none; padding-top: 0; }
+.guide-row b { flex: none; width: 96px; color: var(--ember); font-weight: 700; }
+.guide-row span { color: var(--ink-2); }
+
+/* reset options list */
+.opt-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  border: 1.5px solid var(--line-2); background: var(--card); color: var(--ink);
+  border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+  font: inherit; transition: border-color .15s, background .15s;
+}
+.opt-row.on { border-color: var(--ember); background: var(--ember-soft); }
+.opt-ic { font-size: 20px; flex: none; }
+.opt-label { display: block; font-weight: 600; font-size: 14.5px; }
+.opt-desc { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.opt-row > span:nth-child(2) { flex: 1; min-width: 0; }
+.opt-check {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--line-2); display: grid; place-items: center;
+  color: var(--paper); font-size: 13px; font-weight: 700;
+}
+.opt-check::after { content: '✓'; opacity: 0; }
+.opt-row.on .opt-check { background: var(--ember); border-color: var(--ember); }
+.opt-row.on .opt-check::after { opacity: 1; }
+
 .toast {
   position: fixed; bottom: calc(90px + var(--safe-bot)); left: 50%; transform: translateX(-50%) translateY(20px);
   background: var(--ink); color: var(--paper); padding: 12px 20px; border-radius: 999px;
