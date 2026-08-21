@@ -566,7 +566,7 @@ function drawerAction(act) {
 
 /* --------------- Strava integration --------------- */
 const STRAVA_CLIENT_ID = '273694';
-const STRAVA_REDIRECT = window.location.origin + '/api/strava-callback';
+const STRAVA_REDIRECT = 'https://moe-s-workout-tracker.vercel.app/api/strava-callback';
 
 function connectStrava() {
   const params = new URLSearchParams({
