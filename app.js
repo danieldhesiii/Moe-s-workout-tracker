@@ -2669,9 +2669,18 @@ Object.assign(window, {
   triggerWeatherDetect,
 });
 
-/* --------------- Register service worker (PWA) --------------- */
+/* --------------- Register service worker (PWA) + auto-update --------------- */
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // When a new service worker takes control, reload once so the page swaps to
+  // fresh files immediately (no more "stuck on an old version" after a deploy).
+  let __swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (__swReloaded) return; __swReloaded = true; location.reload();
+  });
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    reg.update();                       // check for a newer worker on every load
+    setInterval(() => reg.update(), 60 * 60 * 1000);  // and hourly while open
+  }).catch(() => {});
 }
 
 /* --------------- Boot --------------- */
