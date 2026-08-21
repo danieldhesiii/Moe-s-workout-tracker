@@ -30,6 +30,7 @@ const defaultState = () => ({
   manualPBs: {},     // {k5:{pace,date,note}, k10:{...}, half:{...}, marathon:{...}}
   routes: [],        // [{id, name, distanceKm, note, tags:[]}]
   cycle: {},         // {lastPeriod:'YYYY-MM-DD', cycleLength:28}
+  favorites: { runs: [], str: [], ex: [] },  // starred ids by type
 });
 
 let state = load();
@@ -49,6 +50,10 @@ function ensureShape(s) {
   s.manualPBs   = s.manualPBs   || {};
   s.routes      = s.routes      || [];
   s.cycle       = s.cycle       || {};
+  s.favorites   = s.favorites   || { runs: [], str: [], ex: [] };
+  s.favorites.runs = s.favorites.runs || [];
+  s.favorites.str  = s.favorites.str  || [];
+  s.favorites.ex   = s.favorites.ex   || [];
   return s;
 }
 
@@ -344,15 +349,221 @@ view.addEventListener('touchend', e => {
 
 function render() {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
-  ({ today: renderToday, plan: renderPlan, log: () => openLogSheet(), progress: renderProgress, goals: renderGoals, library: renderLibrary }[currentTab] || renderToday)();
+  ({ today: renderToday, plan: renderPlan, log: () => openLogSheet(), progress: renderProgress, goals: renderGoals, library: renderLibrary, favorites: renderFavorites }[currentTab] || renderToday)();
   updateHeader();
+  if (window.__animView) window.__animView();   // page-transition + heading reveal (set up in anim section)
 }
+
+/* --------------- Tab sub-pages (pop-up menus + in-page chips) --------------- */
+// Which tabs expand into sub-pages, and the remembered sub-page for each.
+const SUBPAGES = {
+  progress: [
+    { k: 'overview', label: 'Overview', ic: '📊' },
+    { k: 'body',     label: 'Body',     ic: '🫀' },
+    { k: 'history',  label: 'History',  ic: '📅' },
+  ],
+  library: [
+    { k: 'favs',     label: 'Favourites', ic: '⭐' },
+    { k: 'runs',     label: 'Runs',       ic: '🏃‍♀️' },
+    { k: 'strength', label: 'Strength',   ic: '🏋️' },
+    { k: 'rehab',    label: 'Rehab',      ic: '🩹' },
+  ],
+};
+const subTab = { progress: 'overview', library: 'favs' };
+function subOf(tab) { return SUBPAGES[tab] ? subTab[tab] : null; }
+function goSub(tab, k) { if (SUBPAGES[tab]) subTab[tab] = k; currentTab = tab; closeTabMenu(); render(); }
+
+/* --------------- Favourites --------------- */
+function favList(type) { (state.favorites = state.favorites || { runs: [], str: [], ex: [] }); return (state.favorites[type] = state.favorites[type] || []); }
+function isFav(type, id) { return favList(type).includes(id); }
+function favCount() { const f = state.favorites || {}; return (f.runs?.length || 0) + (f.str?.length || 0) + (f.ex?.length || 0); }
+function toggleFav(type, id, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const arr = favList(type);
+  const i = arr.indexOf(id);
+  if (i >= 0) { arr.splice(i, 1); toast('Removed from favourites'); }
+  else { arr.push(id); toast('Added to favourites ⭐'); }
+  save();
+  // Update any visible stars in place (including inside open sheets)...
+  const on = isFav(type, id);
+  document.querySelectorAll(`.fav-star[data-fk="${type}:${id}"]`).forEach(el => { el.classList.toggle('on', on); el.textContent = on ? '★' : '☆'; });
+  // ...and re-render list pages so favourites blocks stay in sync.
+  if (currentTab === 'library' || currentTab === 'favorites') render();
+}
+// Star button markup — sits inside library rows without triggering the row tap.
+function favStar(type, id) {
+  const on = isFav(type, id);
+  return `<span class="fav-star${on ? ' on' : ''}" data-fk="${type}:${id}" role="button" aria-label="Favourite"
+    onclick="toggleFav('${type}','${id}',event)">${on ? '★' : '☆'}</span>`;
+}
+
+function renderFavorites() {
+  const favRuns = allRuns().filter(r => isFav('runs', r.id));
+  const favStr  = allStrBlocks().filter(s => isFav('str', s.id));
+  const favEx   = (state.savedEx || []).filter(e => isFav('ex', e.id));
+  const runRow = r => `<button class="lib-card" onclick="openLibRun('${r.id}')"><div class="lc-left"><div class="lc-icon">🏃‍♀️</div><div class="lc-body"><div class="lc-name">${r.label}</div><div class="lc-meta"><span class="mono" style="color:var(--ember)">${r.target}</span> · ${r.intensity}</div></div></div>${favStar('runs', r.id)}</button>`;
+  const strRow = s => `<button class="lib-card" onclick="openLibStr('${s.id}')"><div class="lc-left"><div class="lc-icon">🏋️</div><div class="lc-body"><div class="lc-name">${s.label}</div><div class="lc-meta">${s.block.length} exercise${s.block.length === 1 ? '' : 's'}</div></div></div>${favStar('str', s.id)}</button>`;
+  const exRow  = e => `<button class="lib-card" onclick="openSavedEx('${e.id}')"><div class="lc-left"><div class="lc-icon">💪</div><div class="lc-body"><div class="lc-name">${e.name}</div><div class="lc-meta">${e.sets}×${e.target}</div></div></div>${favStar('ex', e.id)}</button>`;
+  const empty = !(favRuns.length || favStr.length || favEx.length);
+  view.innerHTML = `
+    <div class="eyebrow">Saved</div>
+    <div class="h-big">Your favourites</div>
+    <p class="muted" style="font-size:13.5px;margin:8px 2px 4px;line-height:1.5">Everything you've starred, in one place. Tap the ★ to remove.</p>
+    ${empty ? `<div class="empty" style="margin-top:20px"><div class="e-emoji">⭐</div><p>Nothing saved yet.<br>Tap the ☆ on any session or exercise to add it here.</p></div>` : `
+      ${favRuns.length ? `<div class="section-title">🏃‍♀️ Sessions · Runs</div><div class="lib-card-list">${favRuns.map(runRow).join('')}</div>` : ''}
+      ${favStr.length ? `<div class="section-title">🏋️ Sessions · Strength</div><div class="lib-card-list">${favStr.map(strRow).join('')}</div>` : ''}
+      ${favEx.length ? `<div class="section-title">💪 Exercises</div><div class="lib-card-list">${favEx.map(exRow).join('')}</div>` : ''}
+    `}
+    <div style="height:32px"></div>`;
+}
+
+/* --------------- Drag-to-reorder (pointer-based sortable) --------------- */
+// listEl contains rows matching itemSel (each with data-idx). Dragging a handleSel
+// element live-reorders the DOM; on drop, onDrop(newOrderOfOriginalIndices) fires.
+function attachDragReorder(listEl, itemSel, handleSel, onDrop) {
+  if (!listEl) return;
+  listEl.querySelectorAll(handleSel).forEach(handle => {
+    handle.style.touchAction = 'none';
+    handle.addEventListener('pointerdown', e => {
+      const dragEl = handle.closest(itemSel); if (!dragEl) return;
+      e.preventDefault();
+      dragEl.classList.add('drag-active');
+      if (window.gsap) gsap.to(dragEl, { scale: 1.02, duration: .12 });
+      const move = ev => {
+        const y = ev.clientY;
+        const sibs = [...listEl.querySelectorAll(itemSel)].filter(x => x !== dragEl);
+        let placed = false;
+        for (const s of sibs) {
+          const r = s.getBoundingClientRect();
+          if (y < r.top + r.height / 2) { listEl.insertBefore(dragEl, s); placed = true; break; }
+        }
+        if (!placed) listEl.appendChild(dragEl);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        if (window.gsap) gsap.to(dragEl, { scale: 1, duration: .15 });
+        dragEl.classList.remove('drag-active');
+        const order = [...listEl.querySelectorAll(itemSel)].map(x => +x.dataset.idx);
+        onDrop(order);
+      };
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', up, { once: true });
+    });
+  });
+}
+const DRAG_HANDLE = `<span class="drag-handle" title="Drag to reorder">⠿</span>`;
+
+// In-page chip row that mirrors a tab's sub-pages.
+function segBar(tab) {
+  const items = SUBPAGES[tab]; if (!items) return '';
+  return `<div class="segbar">${items.map(s =>
+    `<button class="segchip${subTab[tab] === s.k ? ' on' : ''}" onclick="goSub('${tab}','${s.k}')">
+       <span class="segchip-ic">${s.ic}</span>${s.label}</button>`).join('')}</div>`;
+}
+
+// Mark tabs that have sub-pages with a caret affordance.
+Object.keys(SUBPAGES).forEach(t => {
+  const btn = document.querySelector(`.tab[data-tab="${t}"]`);
+  if (btn) btn.classList.add('has-sub');
+});
 
 document.getElementById('tabbar').addEventListener('click', e => {
   const btn = e.target.closest('.tab'); if (!btn) return;
-  if (btn.dataset.tab === 'log') { openLogSheet(); return; }
-  currentTab = btn.dataset.tab; render();
+  const tab = btn.dataset.tab;
+  if (tab === 'log') { closeTabMenu(); openLogSheet(); return; }
+  currentTab = tab; render();
+  if (SUBPAGES[tab]) openTabMenu(tab, btn); else closeTabMenu();
 });
+
+// Pop-up menu of sub-pages, anchored above the tapped tab.
+function openTabMenu(tab, btn) {
+  closeTabMenu();
+  const menu = document.createElement('div');
+  menu.className = 'tabmenu';
+  menu.id = 'tabMenu';
+  menu.innerHTML = SUBPAGES[tab].map(s =>
+    `<button class="tabmenu-item${subTab[tab] === s.k ? ' on' : ''}" data-k="${s.k}">
+       <span class="tm-ic">${s.ic}</span>${s.label}</button>`).join('');
+  document.body.appendChild(menu);
+  // position centered above the tab button
+  const r = btn.getBoundingClientRect();
+  menu.style.visibility = 'hidden';
+  requestAnimationFrame(() => {
+    const mw = menu.offsetWidth;
+    let left = r.left + r.width / 2 - mw / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+    menu.style.left = left + 'px';
+    menu.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+    menu.style.visibility = 'visible';
+    menu.classList.add('open');
+    if (window.gsap) gsap.from(menu, { y: 8, opacity: 0, duration: .22, ease: 'power2.out' });
+  });
+  menu.addEventListener('click', ev => {
+    const it = ev.target.closest('.tabmenu-item'); if (!it) return;
+    goSub(tab, it.dataset.k);
+  });
+  setTimeout(() => document.addEventListener('pointerdown', tabMenuOutside, true), 0);
+}
+function tabMenuOutside(e) {
+  if (!e.target.closest('#tabMenu') && !e.target.closest('.tab.has-sub')) closeTabMenu();
+}
+function closeTabMenu() {
+  const m = document.getElementById('tabMenu'); if (m) m.remove();
+  document.removeEventListener('pointerdown', tabMenuOutside, true);
+}
+
+/* --------------- Left drawer (global / secondary actions) --------------- */
+function openDrawer() {
+  closeTabMenu();
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  const favN = favCount();
+  back.innerHTML = `
+    <aside class="drawer" role="menu">
+      <div class="drawer-head">
+        <span class="brand-mark">M</span>
+        <div><div class="brand-name">Moe's Log</div><div class="brand-date">Menu</div></div>
+      </div>
+      <button class="drawer-item" data-act="favorites"><span class="di-ic">⭐</span>Favourites${favN ? `<span class="di-badge">${favN}</span>` : ''}</button>
+      <button class="drawer-item" data-act="routes"><span class="di-ic">🗺️</span>My routes</button>
+      <button class="drawer-item" data-act="pace"><span class="di-ic">⏱️</span>Pace calculator</button>
+      <div class="drawer-sep"></div>
+      <button class="drawer-item" data-act="checkin"><span class="di-ic">💗</span>Daily check-in</button>
+      <button class="drawer-item" data-act="create"><span class="di-ic">➕</span>Create custom session</button>
+      <div class="drawer-sep"></div>
+      <button class="drawer-item" data-act="reset"><span class="di-ic">♻️</span>Reset data</button>
+      <div class="drawer-foot"><span id="drawerSync">${syncReady ? 'Synced to cloud ✓' : 'Offline — saved on device'}</span></div>
+    </aside>`;
+  back.addEventListener('click', e => { if (e.target === back) closeDrawer(); });
+  back.querySelector('.drawer').addEventListener('click', e => {
+    const b = e.target.closest('.drawer-item'); if (!b) return;
+    closeDrawer(); drawerAction(b.dataset.act);
+  });
+  document.body.appendChild(back);
+  requestAnimationFrame(() => {
+    back.classList.add('open');
+    if (window.gsap) gsap.from(back.querySelector('.drawer'), { x: -40, opacity: .4, duration: .28, ease: 'power3.out' });
+  });
+}
+function closeDrawer() { const b = document.querySelector('.drawer-backdrop'); if (b) b.remove(); }
+function drawerAction(act) {
+  switch (act) {
+    case 'favorites': currentTab = 'favorites'; render(); break;
+    case 'routes':    openRoutes(); break;
+    case 'pace':      openPaceCalc(); break;
+    case 'checkin':   openCheckin(); break;
+    case 'create':    openCreateCustom(); break;
+    case 'reset':     if (confirm('Reset all data on this device? This cannot be undone.')) resetAll(); break;
+  }
+}
+document.getElementById('menuBtn')?.addEventListener('click', openDrawer);
+
+function resetAll() {
+  try { localStorage.removeItem(STORE_KEY); } catch {}
+  state = seedDemo(defaultState());
+  save(); currentTab = 'today'; render(); toast('Data reset');
+}
 
 function updateHeader() {
   const d = new Date();
@@ -951,7 +1162,7 @@ function openLibRun(id) {
   const intensityBand = /Zone 4|Zone 5|VO2/.test(r.intensity) ? 'hard' : /Zone 3/.test(r.intensity) ? 'caution' : '';
   mountSheet(`
     <div class="eyebrow" style="margin-top:2px">Run session${r.custom ? ' · <span style="color:var(--ember)">custom</span>' : ''}</div>
-    <h2>${r.label}</h2>
+    <div class="sheet-title-row"><h2>${r.label}</h2>${favStar('runs', r.id)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px">
       <span class="pill ${intensityBand || 'go'}">${r.intensity}</span>
     </div>
@@ -994,7 +1205,7 @@ function openLibStr(id) {
   const coach = s.custom ? 'Your custom block — warm up well and track your reps for progressive overload.' : 'Control every rep — quality beats quantity. Progressive overload when it feels clean.';
   mountSheet(`
     <div class="eyebrow" style="margin-top:2px">Strength block · ${s.block.length} exercises${s.custom ? ' · <span style="color:var(--ember)">custom</span>' : ''}</div>
-    <h2>${s.label}</h2>
+    <div class="sheet-title-row"><h2>${s.label}</h2>${s.id === 'kneerehab' ? '' : favStar('str', s.id)}</div>
     <div class="exlist" style="margin-top:14px">${exRows}</div>
     <div class="coach-note" style="margin-top:14px"><strong>Coach:</strong> ${coach}</div>
     <button class="btn btn-ember" style="margin-top:20px" onclick="startLibStrSession('${s.id}')">▶ Start this session</button>
@@ -1117,9 +1328,9 @@ function renderCustomExList() {
     rebindStrSave(); return;
   }
   el.innerHTML = customExercises.map((ex, i) => `
-    <div class="custom-ex-row">
+    <div class="custom-ex-row" data-idx="${i}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <span style="font-size:12px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">Exercise ${i + 1}</span>
+        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">${DRAG_HANDLE}Exercise ${i + 1}</span>
         <div style="display:flex;gap:6px">
           <button onclick="saveExFromBlock(${i})" style="border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink-3);padding:2px 4px" title="Save to exercise library">☆ Save</button>
           ${customExercises.length > 1 ? `<button onclick="removeCustomEx(${i})" style="border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink-3);padding:2px 4px">✕</button>` : ''}
@@ -1138,6 +1349,10 @@ function renderCustomExList() {
   el.querySelectorAll('.cex-sets').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].sets = e.target.value; }));
   el.querySelectorAll('.cex-target').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].target = e.target.value; }));
   el.querySelectorAll('.cex-note').forEach(inp => inp.addEventListener('input', e => { customExercises[+e.target.dataset.i].note = e.target.value; }));
+  attachDragReorder(el, '.custom-ex-row', '.drag-handle', order => {
+    customExercises = order.map(i => customExercises[i]);
+    renderCustomExList();
+  });
   rebindStrSave();
 }
 
@@ -1287,22 +1502,6 @@ function renderPlan() {
     ${lowRest ? `<div class="card" style="margin-top:12px;border-color:var(--ember);background:var(--ember-soft)"><div style="font-size:13.5px;color:var(--ink);line-height:1.5"><b>⚠️ Only ${restDays} rest day${restDays === 1 ? '' : 's'} this week.</b> Aim for at least 2 to protect the knees.</div></div>` : ''}
     <div class="section-title">This week</div>
     <div class="week-grid">${cards}</div>
-    <div class="card" style="margin-top:16px">
-      <div class="eyebrow">Weekly volume target</div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-top:4px">
-        <span class="mono" style="font-size:26px;font-weight:700">${state.settings.weeklyTarget}</span>
-        <span class="muted">km / week — building gradually (max +10%/wk)</span>
-      </div>
-    </div>
-
-    <div class="section-title">Exercise library</div>
-    <div class="card" style="padding:14px 16px">
-      <p class="muted" style="font-size:13px;line-height:1.5;margin-bottom:14px">Browse all run sessions and strength blocks, start any session directly, or create your own custom ones.</p>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="currentTab='library';render()">📚 Browse library</button>
-        <button class="btn btn-ghost" style="flex:1;font-size:14px" onclick="openCreateCustom()">＋ Create custom</button>
-      </div>
-    </div>
 
     ${renderWeeklyNotes()}
   `;
@@ -1368,11 +1567,9 @@ function renderProgress() {
 
   const entries = s.slice().reverse().slice(0, 20).map(renderLogEntry).join('');
 
-  view.innerHTML = `
-    <div class="eyebrow">Progress</div>
-    <div class="h-big">Your numbers</div>
-
-    <div class="card" style="margin-top:16px">
+  const sub = subTab.progress;
+  const overview = `
+    <div class="card" style="margin-top:6px">
       <div class="wk-prog-top">
         <span class="eyebrow" style="margin:0">This week</span>
         <span class="mono" style="font-size:13px;font-weight:700;color:var(--ember)">${wkKm.toFixed(1)}<span style="color:var(--ink-3);font-weight:400"> / ${target} km</span></span>
@@ -1394,10 +1591,7 @@ function renderProgress() {
     </div>
 
     ${buildPBCard(pbs)}
-
     ${buildLongRunCard()}
-
-    ${buildCycleCard()}
 
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn btn-ghost" style="flex:1;font-size:13.5px" onclick="openPaceCalc()">⏱ Pace calculator</button>
@@ -1410,19 +1604,25 @@ function renderProgress() {
     <div class="card" style="margin-top:12px">
       <div class="eyebrow">Last 7 days · km</div>
       <div class="bars">${bars7}</div>
-    </div>
+    </div>`;
 
+  const body = `
+    ${buildCycleCard()}
     ${buildKneeTrend()}
-
     ${buildHRZoneChart()}
+    ${buildWeightSection()}`;
 
-    <div class="section-title">Monthly breakdown</div>
+  const history = `
+    <div class="section-title" style="margin-top:6px">Monthly breakdown</div>
     <div class="card">${buildMonthlySummary()}</div>
-
-    ${buildWeightSection()}
-
     <div class="section-title">History</div>
-    ${entries || `<div class="empty"><div class="e-emoji">🗒️</div><p>No sessions yet.<br>Tap the <b>＋</b> to log your first one.</p></div>`}
+    ${entries || `<div class="empty"><div class="e-emoji">🗒️</div><p>No sessions yet.<br>Tap the <b>＋</b> to log your first one.</p></div>`}`;
+
+  view.innerHTML = `
+    <div class="eyebrow">Progress</div>
+    <div class="h-big">Your numbers</div>
+    ${segBar('progress')}
+    <div class="subpage">${sub === 'body' ? body : sub === 'history' ? history : overview}</div>
   `;
 }
 
@@ -1836,7 +2036,7 @@ function renderLibrary() {
           <div class="lc-meta"><span class="mono" style="color:var(--ember)">${r.target}</span> · ${r.intensity}</div>
         </div>
       </div>
-      ${libCardChevron()}
+      <div class="lc-actions">${favStar('runs', r.id)}${libCardChevron()}</div>
     </button>`;
 
   const makeStrRow = s => `
@@ -1848,7 +2048,7 @@ function renderLibrary() {
           <div class="lc-meta">${s.block.length} exercise${s.block.length === 1 ? '' : 's'}</div>
         </div>
       </div>
-      ${libCardChevron()}
+      <div class="lc-actions">${favStar('str', s.id)}${libCardChevron()}</div>
     </button>`;
 
   const makeExRow = ex => `
@@ -1860,39 +2060,37 @@ function renderLibrary() {
           <div class="lc-meta">${ex.sets}×${ex.target}</div>
         </div>
       </div>
-      ${libCardChevron()}
+      <div class="lc-actions">${favStar('ex', ex.id)}${libCardChevron()}</div>
     </button>`;
 
-  const customRunSection = state.customRuns?.length
-    ? `<div class="eyebrow" style="margin:18px 0 10px">⭐ Your custom runs</div>
-       <div class="lib-card-list">${state.customRuns.map(makeRunRow).join('')}</div>` : '';
+  const sub = subTab.library;
 
-  const customStrSection = state.customStr?.length
-    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your custom strength blocks</div>
-       <div class="lib-card-list">${state.customStr.map(makeStrRow).join('')}</div>` : '';
+  // ---- Favourites sub-page ----
+  const favRuns = allRuns().filter(r => isFav('runs', r.id));
+  const favStr  = allStrBlocks().filter(s => isFav('str', s.id));
+  const favEx   = (state.savedEx || []).filter(e => isFav('ex', e.id));
+  const favBlock = (favRuns.length || favStr.length || favEx.length)
+    ? `${favRuns.length ? `<div class="eyebrow" style="margin:6px 0 10px">🏃‍♀️ Runs</div><div class="lib-card-list">${favRuns.map(makeRunRow).join('')}</div>` : ''}
+       ${favStr.length ? `<div class="eyebrow" style="margin:18px 0 10px">🏋️ Strength</div><div class="lib-card-list">${favStr.map(makeStrRow).join('')}</div>` : ''}
+       ${favEx.length ? `<div class="eyebrow" style="margin:18px 0 10px">💪 Exercises</div><div class="lib-card-list">${favEx.map(makeExRow).join('')}</div>` : ''}`
+    : `<div class="empty"><div class="e-emoji">⭐</div><p>No favourites yet.<br>Tap the ☆ on any session or exercise to save it here.</p></div>`;
 
-  const savedExSection = state.savedEx?.length
-    ? `<div class="eyebrow" style="margin:20px 0 10px">⭐ Your saved exercises</div>
-       <div class="lib-card-list">${state.savedEx.map(makeExRow).join('')}</div>` : '';
+  // ---- Runs sub-page (custom + built-in) ----
+  const runsPage = `
+    ${state.customRuns?.length ? `<div class="eyebrow" style="margin:6px 0 10px">✨ Your custom runs</div><div class="lib-card-list">${state.customRuns.map(makeRunRow).join('')}</div>` : ''}
+    <div class="eyebrow" style="margin:${state.customRuns?.length ? '20' : '6'}px 0 10px">🏃‍♀️ Run sessions</div>
+    <div class="lib-card-list">${LIB_RUNS.map(makeRunRow).join('')}</div>`;
 
-  const hasCustom = customRunSection || customStrSection || savedExSection;
+  // ---- Strength sub-page ----
+  const strPage = `
+    ${state.customStr?.length ? `<div class="eyebrow" style="margin:6px 0 10px">✨ Your custom blocks</div><div class="lib-card-list">${state.customStr.map(makeStrRow).join('')}</div>` : ''}
+    ${state.savedEx?.length ? `<div class="eyebrow" style="margin:${state.customStr?.length ? '20' : '6'}px 0 10px">💪 Saved exercises</div><div class="lib-card-list">${state.savedEx.map(makeExRow).join('')}</div>` : ''}
+    <div class="eyebrow" style="margin:${(state.customStr?.length || state.savedEx?.length) ? '20' : '6'}px 0 10px">🏋️ Strength blocks</div>
+    <div class="lib-card-list">${LIB_STRENGTH.map(makeStrRow).join('')}</div>`;
 
-  view.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 2px">
-      <div class="section-title" style="margin:22px 2px 0">Library</div>
-      <button class="add-inline" style="margin-top:18px" onclick="openCreateCustom()">＋ Create</button>
-    </div>
-    <p style="font-size:13.5px;color:var(--ink-3);margin:6px 2px 18px;line-height:1.4">Browse every session and exercise. Tap to preview, start, or log it.</p>
-
-    ${hasCustom ? customRunSection + customStrSection + savedExSection : ''}
-
-    <div class="eyebrow" style="margin:${hasCustom ? '20' : '0'}px 0 10px">🏃‍♀️ Run sessions</div>
-    <div class="lib-card-list">${LIB_RUNS.map(makeRunRow).join('')}</div>
-
-    <div class="eyebrow" style="margin:20px 0 10px">🏋️ Strength blocks</div>
-    <div class="lib-card-list">${LIB_STRENGTH.map(makeStrRow).join('')}</div>
-
-    <div class="eyebrow" style="margin:20px 0 10px">🩹 Rehab & recovery</div>
+  // ---- Rehab sub-page ----
+  const rehabPage = `
+    <div class="eyebrow" style="margin:6px 0 10px">🩹 Rehab & recovery</div>
     <div class="lib-card-list">
       <button class="lib-card" onclick="openLibStr('kneerehab')">
         <div class="lc-left">
@@ -1904,7 +2102,20 @@ function renderLibrary() {
         </div>
         ${libCardChevron()}
       </button>
+    </div>`;
+
+  const pages = { favs: favBlock, runs: runsPage, strength: strPage, rehab: rehabPage };
+
+  view.innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Library</div>
+        <div class="h-big">Sessions &amp; exercises</div>
+      </div>
+      <button class="add-pill" onclick="openCreateCustom()">＋ Create</button>
     </div>
+    ${segBar('library')}
+    <div class="subpage">${pages[sub] || favBlock}</div>
     <div style="height:32px"></div>`;
 }
 
@@ -2393,8 +2604,55 @@ function deleteRoute(id) {
   save(); closeSheet(); openRoutes();
 }
 
+/* --------------- Motion: Lenis smooth scroll + GSAP + Splitting reveals --------------- */
+const REDUCE_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let lenis = null;
+
+function initMotion() {
+  if (REDUCE_MOTION) return;
+  // Smooth scroll on the inner .view scroller, RAF-synced with the GSAP ticker when available.
+  const viewEl = document.getElementById('view');
+  if (typeof Lenis !== 'undefined' && viewEl) {
+    lenis = new Lenis({ wrapper: viewEl, content: viewEl, duration: 0.9, easing: t => Math.min(1, 1.001 - Math.pow(2, -10 * t)), smoothWheel: true });
+    if (window.gsap && gsap.ticker) {
+      gsap.ticker.add(time => lenis.raf(time * 1000));
+      gsap.ticker.lagSmoothing(0);
+    } else {
+      const raf = t => { lenis.raf(t); requestAnimationFrame(raf); };
+      requestAnimationFrame(raf);
+    }
+  }
+}
+
+// Called after every render() to give each page a fresh, animated entrance.
+window.__animView = function () {
+  const root = document.getElementById('view');
+  if (!root) return;
+  // Snap to top on page change so pages feel discrete.
+  if (lenis) lenis.scrollTo(0, { immediate: true }); else { window.scrollTo(0, 0); root.scrollTop = 0; }
+  if (REDUCE_MOTION) return;
+
+  // Staggered word/char reveal on the big display heading.
+  if (typeof Splitting !== 'undefined') {
+    root.querySelectorAll('.h-big').forEach(h => {
+      try {
+        const res = Splitting({ target: h, by: 'chars' });
+        if (window.gsap && res[0] && res[0].chars) {
+          gsap.from(res[0].chars, { yPercent: 55, opacity: 0, stagger: 0.012, duration: 0.5, ease: 'power3.out', clearProps: 'all' });
+        }
+      } catch {}
+    });
+  }
+  // Card / row entrance.
+  if (window.gsap) {
+    const items = root.querySelectorAll('.card, .day-card, .lib-card, .stat, .segchip, .empty');
+    gsap.from(items, { y: 12, opacity: 0, duration: 0.42, stagger: 0.025, ease: 'power2.out', clearProps: 'all' });
+  }
+};
+
 /* --------------- Expose for inline onclick --------------- */
 Object.assign(window, {
+  goSub, toggleFav, openDrawer, resetAll,
   openCheckin, openSwap, openLogSheet, openGoalSheet,
   delSession, delGoal, openDayDetail, startWorkout, closeSheet,
   toggleStep, openDayEditor, pickLib, saveDayEditor, resetDay,
@@ -2415,6 +2673,7 @@ if ('serviceWorker' in navigator) {
 
 /* --------------- Boot --------------- */
 try {
+  initMotion();
   render();
   initSync();
 } catch (err) {

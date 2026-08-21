@@ -1,5 +1,5 @@
 /* Service worker — offline-first shell cache for Moe's Training Log */
-const CACHE = 'moe-v16';
+const CACHE = 'moe-v18';
 const SHELL = [
   '/',
   '/index.html',
@@ -9,6 +9,12 @@ const SHELL = [
   '/config.js',
   '/icon.svg',
   '/manifest.json',
+  '/vendor/gsap.min.js',
+  '/vendor/lenis.min.js',
+  '/vendor/splitting.min.js',
+  '/vendor/splitting.css',
+  '/vendor/swiper-bundle.min.js',
+  '/vendor/swiper-bundle.min.css',
 ];
 
 self.addEventListener('install', e => {
@@ -32,6 +38,18 @@ self.addEventListener('fetch', e => {
       url.includes('gstatic') || url.includes('open-meteo')) {
     return;
   }
+  // Network-first for the page document (HTML shell) so it never gets stuck stale;
+  // fall back to cache when offline.
+  const isDoc = e.request.mode === 'navigate' || e.request.destination === 'document';
+  if (isDoc) {
+    e.respondWith(
+      fetch(e.request)
+        .then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return res; })
+        .catch(() => caches.match(e.request).then(c => c || caches.match('/index.html')))
+    );
+    return;
+  }
+  // Cache-first for everything else (versioned assets bypass via ?v= query).
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );
